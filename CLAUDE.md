@@ -63,6 +63,7 @@ make env          # hardware, MPS, Ollama, and what's in the shared cache
 make data         # symlink Fine Print's data, write the manifest, fetch SciFact
 make data-verify  # check Fine Print hasn't changed
 make baseline     # measure bge-small and compare it with Fine Print's published scores
+make benchmark    # measure every model, one process each; a rerun re-measures timings only
 uv run pytest tests/test_x.py::test_y   # a single test
 ```
 
@@ -70,7 +71,8 @@ Tests use no network, models, Ollama or real data, only tiny fakes. They do need
 
 ## Status
 
-- **Done:** setup, data, fresh held-out set frozen, baseline. bge-small reproduces all five of Fine Print's published tuning scores on 1,581 chunks. Its timings are provisional because Chrome and Teams were open.
-- **Decisions:** EmbeddingGemma was replaced by `intfloat/e5-base-v2`, because there is no Hugging Face login on this machine. Nomic may use `trust_remote_code`, pinned to a revision, and the README must say so. The unseen-companies fine-tuning test is in, labelled as a rough signal of about 9 questions.
-- **Next:** model benchmark, once the user has closed Chrome and Teams. It re-times bge-small, whose baseline timings don't count.
+- **Done:** setup, data, fresh held-out set frozen, baseline, model benchmark. bge-small reproduces Fine Print's published tuning scores, and SciFact nDCG@10 is within 0.011 of MTEB's for all six models. Results are in `results/models/`. Quality scores are final, but timings are provisional because Chrome was open.
+- **Decisions:** EmbeddingGemma was replaced by `intfloat/e5-base-v2`, because there is no Hugging Face login on this machine. Nomic runs without `trust_remote_code`, which current transformers doesn't need; the README must say so. The unseen-companies fine-tuning test is in, labelled as a rough signal of about 9 questions.
+- **Open question:** Granite scores 13/31 on tuning hit@5 but well on SciFact. It finds the right company and document, so the keyword test may be understating it. Don't report it as simply worse without saying this.
+- **Next:** prefix ablation. `make benchmark` must be rerun with Chrome closed before any timing is reported as final; embeddings come from the cache.
 - **Synthetic generation:** time 20 chunks first and report an estimate. The full run must be resumable, because the user will run it overnight.
