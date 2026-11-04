@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     data_dir: Path = PROJECT_ROOT / "data"
     results_dir: Path = PROJECT_ROOT / "results"
 
+    # The frozen held-out set. Changing it needs a new hash here, which a review would catch.
+    fresh_holdout_path: Path = PROJECT_ROOT / "eval" / "fresh_holdout" / "questions.jsonl"
+    fresh_holdout_sha256: str = "590c4b360169d2b0efd1123790fa6c47e7226c3d7e4b12c01fdfdac60fd76fb4"
+
     # SciFact, pinned so that the benchmark can be reproduced exactly.
     scifact_corpus_repo: str = "BeIR/scifact"
     scifact_corpus_revision: str = "b3b5335604bf5ee3c4447671af975ea25143d4f5"
