@@ -46,7 +46,9 @@ This machine has 16 GB of RAM, and `gemma4:e4b` needs 6-7 GB.
 - **Choose models and settings on the tuning set only** (`data/fine_print/tuning_questions.jsonl`).
 - **Run the held-out set once, at the very end,** for the final 2-3 configurations, and report it as-is. Change nothing because of what it shows.
 - **Don't read held-out questions except for the leakage check.** Counting and hashing them is fine.
-- **`eval/holdout/` in Fine Print is already spent:** it was scored for its v2 and v3, and those scores are in its README. Never present it here as a clean held-out estimate.
+- **The headline held-out result comes from `eval/fresh_holdout/`,** 30 questions frozen before any benchmark ran. They were written by Claude, so never describe them as human or independent. Never edit them: a test checks the file's hash.
+- **`eval/holdout/` in Fine Print is already spent:** it was scored for its v2 and v3, and those scores are in its README. Report it separately, labelled as previously used, and never as a clean estimate.
+- **Timings count only when no competing app is running.** A result with `timings_provisional: true` has valid quality scores, but its speeds can't be reported as final. Remind the user to close Chrome and Teams before each timing-sensitive step, and re-check memory and swap.
 - **No eval question, tuning or held-out, may appear in training data.** Drop synthetic queries that are near-duplicates of eval questions, and report how many were dropped.
 - **Report the number of questions with every result,** and say when a gap is within one or two questions, which is likely noise. One question is 3.2 points on the tuning set (31) and 5 points on the Fine Print held-out set (20).
 - **Selection rule, fixed before any results:** the highest tuning recall@5 wins. Between configurations within two questions of each other, the smaller and faster one wins.
@@ -60,6 +62,7 @@ make check        # lint, typecheck and test, as CI does
 make env          # hardware, MPS, Ollama, and what's in the shared cache
 make data         # symlink Fine Print's data, write the manifest, fetch SciFact
 make data-verify  # check Fine Print hasn't changed
+make baseline     # measure bge-small and compare it with Fine Print's published scores
 uv run pytest tests/test_x.py::test_y   # a single test
 ```
 
@@ -67,6 +70,7 @@ Tests use no network, models, Ollama or real data, only tiny fakes. They do need
 
 ## Status
 
-- **Done:** setup, data.
-- **Waiting for the user:** which held-out set to use, EmbeddingGemma access, `trust_remote_code` for Nomic, and whether to add the unseen-companies test.
-- **Next:** baseline benchmark. It should reproduce Fine Print's tuning scores: Recall@1 0.58, Recall@5 0.65, Recall@10 0.68, MRR 0.618 on 1,581 chunks.
+- **Done:** setup, data, fresh held-out set frozen, baseline. bge-small reproduces all five of Fine Print's published tuning scores on 1,581 chunks. Its timings are provisional because Chrome and Teams were open.
+- **Decisions:** EmbeddingGemma was replaced by `intfloat/e5-base-v2`, because there is no Hugging Face login on this machine. Nomic may use `trust_remote_code`, pinned to a revision, and the README must say so. The unseen-companies fine-tuning test is in, labelled as a rough signal of about 9 questions.
+- **Next:** model benchmark, once the user has closed Chrome and Teams. It re-times bge-small, whose baseline timings don't count.
+- **Synthetic generation:** time 20 chunks first and report an estimate. The full run must be resumable, because the user will run it overnight.

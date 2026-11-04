@@ -10,3 +10,4 @@ coverage.xml
 # Symlinks to ../fine-print, the embedding cache and fine-tuned models.
 data/
 models/
+results/.heavy.lock

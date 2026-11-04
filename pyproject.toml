@@ -14,7 +14,6 @@ dependencies = [
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
     "sentence-transformers>=6.2.0",
-    "structlog>=26.1.0",
     "torch>=2.15.0",
     "typer>=0.27.3",
 ]
@@ -71,6 +70,7 @@ python-version = "3.14"
 include = ["src", "tests", "scripts"]
 
 [tool.pytest.ini_options]
+pythonpath = ["tests"]
 testpaths = ["tests"]
 addopts = "--strict-markers"
 
