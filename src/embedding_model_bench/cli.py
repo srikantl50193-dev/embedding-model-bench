@@ -300,6 +300,44 @@ def prefixes() -> None:
         raise typer.Exit(1)
 
 
+@app.command()
+def matryoshka() -> None:
+    """Measure recall against storage at shorter vector lengths. This doesn't measure speed."""
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.matryoshka import (  # noqa: PLC0415
+        TRUNCATIONS,
+        matryoshka_table,
+        run_matryoshka,
+    )
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    out_dir = settings.results_dir / "matryoshka"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    with heavy_step(settings.results_dir / ".heavy.lock"):
+        for key, truncation in TRUNCATIONS.items():
+            spec = MODELS[key]
+            result = run_matryoshka(
+                spec,
+                truncation,
+                inputs,
+                settings.data_dir / "embeddings",
+                lambda spec=spec: SentenceTransformerEncoder(spec, _devices()[0]),
+                log=lambda message, key=key: typer.echo(f"[{key}] {message}", err=True),
+            )
+            (out_dir / f"{key}.json").write_text(
+                result.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            results.append(result)
+    table = matryoshka_table(results)
+    (out_dir / "summary.md").write_text(table, encoding="utf-8")
+    typer.echo(table)
+    typer.echo(f"Peak RSS: {max(r.peak_rss_mb for r in results):.0f} MB")
+
+
 def _devices() -> list[str]:
     """Return the devices to time: MPS first where it exists, then always CPU."""
     import torch  # noqa: PLC0415
