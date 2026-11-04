@@ -20,6 +20,15 @@ MTEB_SCIFACT_NDCG = {
 }
 
 
+def noise_note(num_queries: int) -> str:
+    """Say what one question is worth, so that small gaps aren't over-read."""
+    points = 100 / num_queries
+    return (
+        f"n={num_queries}: one question moves a score by {points:.1f} points, "
+        f"so gaps up to {2 * points:.1f} points are likely noise."
+    )
+
+
 class PairedComparison(FrozenModel):
     """How one model did against a reference, on the same questions."""
 

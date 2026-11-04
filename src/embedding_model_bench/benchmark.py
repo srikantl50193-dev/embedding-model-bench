@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from fine_print.models import Chunk
 
+from embedding_model_bench.compare import noise_note
 from embedding_model_bench.embedding import Encoder, EncoderFactory, embed_cached
 from embedding_model_bench.machine import machine_state, mps_allocated_mb, peak_rss_mb
 from embedding_model_bench.metrics import DEEPEST, is_relevant, score, top_k
@@ -192,15 +193,6 @@ def run_benchmark(
             mps_allocated_mb=round(mps_allocated_mb() if "mps" in devices else 0.0, 1),
         ),
         machine=machine,
-    )
-
-
-def noise_note(num_queries: int) -> str:
-    """Say what one question is worth, so that small gaps aren't over-read."""
-    points = 100 / num_queries
-    return (
-        f"n={num_queries}: one question moves a score by {points:.1f} points, "
-        f"so gaps up to {2 * points:.1f} points are likely noise."
     )
 
 

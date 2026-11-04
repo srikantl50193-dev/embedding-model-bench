@@ -12,6 +12,7 @@ from embedding_model_bench.config import get_settings
 from embedding_model_bench.preflight import HeavyStep, run_preflight
 
 if TYPE_CHECKING:
+    from embedding_model_bench.benchmark import BenchmarkInputs
     from embedding_model_bench.models import BenchmarkResult
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -84,12 +85,11 @@ def data_verify() -> None:
     typer.echo(f"Fine Print is unchanged ({manifest.num_chunks} chunks).")
 
 
-def _measure(spec_key: str) -> BenchmarkResult:
-    """Run the preflight checks and measure one model, in this process."""
+def _prepared_inputs() -> BenchmarkInputs:
+    """Run the preflight checks, then load the corpora and tuning questions."""
     from embedding_model_bench.benchmark import (  # noqa: PLC0415
         BenchmarkInputs,
         load_tuning_questions,
-        run_benchmark,
     )
     from embedding_model_bench.corpus import load_chunks  # noqa: PLC0415
     from embedding_model_bench.data import (  # noqa: PLC0415
@@ -97,9 +97,6 @@ def _measure(spec_key: str) -> BenchmarkResult:
         FinePrintDataError,
         verify_manifest,
     )
-    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
-    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
-    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
     from embedding_model_bench.scifact import load_scifact  # noqa: PLC0415
 
     settings = get_settings()
@@ -116,17 +113,28 @@ def _measure(spec_key: str) -> BenchmarkResult:
 
     link_dir = settings.data_dir / LINK_FOLDER
     _, chunks = load_chunks(link_dir / "raw")
-    questions = load_tuning_questions(link_dir / "tuning_questions.jsonl")
+    return BenchmarkInputs(
+        chunks=chunks,
+        questions=load_tuning_questions(link_dir / "tuning_questions.jsonl"),
+        scifact=load_scifact(settings),
+        fine_print_commit=manifest.fine_print_commit,
+        corpus_fingerprint=manifest.corpus_fingerprint,
+    )
+
+
+def _measure(spec_key: str) -> BenchmarkResult:
+    """Measure one model, in this process."""
+    from embedding_model_bench.benchmark import run_benchmark  # noqa: PLC0415
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
     with heavy_step(settings.results_dir / ".heavy.lock"):
         return run_benchmark(
             MODELS[spec_key],
-            BenchmarkInputs(
-                chunks=chunks,
-                questions=questions,
-                scifact=load_scifact(settings),
-                fine_print_commit=manifest.fine_print_commit,
-                corpus_fingerprint=manifest.corpus_fingerprint,
-            ),
+            inputs,
             settings.data_dir / "embeddings",
             SentenceTransformerEncoder,
             _devices(),
@@ -237,6 +245,59 @@ def write_model_summary() -> None:
         report += "\nTimings are provisional: competing apps were open or memory was low.\n"
     (out_dir / "summary.md").write_text(report, encoding="utf-8")
     typer.echo(report)
+
+
+@app.command(name="prefixes-one", hidden=True)
+def prefixes_one(key: str) -> None:
+    """Test one model's prefixes. `prefixes` runs this once per process."""
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.prefixes import run_prefix_ablation  # noqa: PLC0415
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    with heavy_step(settings.results_dir / ".heavy.lock"):
+        result = run_prefix_ablation(
+            MODELS[key],
+            inputs,
+            settings.data_dir / "embeddings",
+            SentenceTransformerEncoder,
+            _devices()[0],
+            log=lambda message: typer.echo(f"[{key}] {message}", err=True),
+        )
+    out_dir = settings.results_dir / "prefixes"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{key}.json").write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+
+@app.command()
+def prefixes() -> None:
+    """Measure each model with and without its prefixes. This measures quality, not speed."""
+    from embedding_model_bench.prefixes import (  # noqa: PLC0415
+        PrefixResult,
+        prefix_table,
+        variants_for,
+    )
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    keys = [key for key, spec in MODELS.items() if variants_for(spec)]
+    failed = []
+    for key in keys:
+        command = [sys.executable, "-m", "embedding_model_bench.cli", "prefixes-one", key]
+        if subprocess.run(command, check=False).returncode != 0:
+            failed.append(key)
+    out_dir = get_settings().results_dir / "prefixes"
+    paths = [out_dir / f"{key}.json" for key in keys if (out_dir / f"{key}.json").exists()]
+    results = [PrefixResult.model_validate_json(p.read_text(encoding="utf-8")) for p in paths]
+    table = prefix_table(results)
+    (out_dir / "summary.md").write_text(table, encoding="utf-8")
+    typer.echo(table)
+    for result in results:
+        typer.echo(f"Peak RSS, {result.spec.key}: {result.peak_rss_mb:.0f} MB")
+    if failed:
+        typer.echo(f"Failed: {', '.join(failed)}", err=True)
+        raise typer.Exit(1)
 
 
 def _devices() -> list[str]:

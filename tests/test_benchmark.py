@@ -1,53 +1,15 @@
 from pathlib import Path
 
 import pytest
-from fine_print.models import Chunk
 
-from conftest_fakes import FakeEncoder
+from conftest_fakes import CHUNKS, INPUTS, QUESTIONS, SPEC, FakeEncoder
 from embedding_model_bench.benchmark import (
-    BenchmarkInputs,
     load_tuning_questions,
-    noise_note,
     run_benchmark,
     summary_table,
 )
-from embedding_model_bench.models import BenchmarkResult, EvalQuestion, ModelSpec, SciFact
-
-SPEC = ModelSpec(key="fake", repo="org/fake", revision="abc", dim=64, query_prefix="q: ")
-
-
-def make_chunk(chunk_id: str, text: str, doc_type: str = "terms", section: str = "Misc") -> Chunk:
-    return Chunk(
-        text=text,
-        company="acme",
-        doc_type=doc_type,
-        section=section,
-        chunk_id=chunk_id,
-        strategy="section",
-        start_char=0,
-        end_char=len(text),
-    )
-
-
-CHUNKS = [
-    make_chunk("a0", "we do not provide refunds", section="Refunds"),
-    make_chunk("a1", "we keep data as long as necessary", "privacy", "Retention"),
-    *[make_chunk(f"f{i}", f"unrelated filler {i}") for i in range(12)],
-]
-QUESTIONS = [
-    EvalQuestion(
-        question="provide refunds", company="acme", doc_type="terms", keywords=["refunds"]
-    ),
-    EvalQuestion(question="keep data", company="acme", doc_type="privacy", keywords=["as long as"]),
-]
-SCIFACT = SciFact(
-    corpus={str(i): f"science document {i} topic{i}" for i in range(12)},
-    queries={"q1": "topic3"},
-    qrels={"q1": {"3": 1}},
-)
-
-
-INPUTS = BenchmarkInputs(CHUNKS, QUESTIONS, SCIFACT, "commit", "fingerprint")
+from embedding_model_bench.compare import noise_note
+from embedding_model_bench.models import BenchmarkResult, ModelSpec
 
 
 def run(tmp_path: Path) -> BenchmarkResult:
