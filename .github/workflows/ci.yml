@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The commit of Fine Print whose chunker the results were produced with.
+  FINE_PRINT_COMMIT: eb00efc102c2cc4cc13547b5d076af23907344fd
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # uv.lock expects the chunker's repo beside this one. Tests use only tiny fake data.
+      - name: Fetch Fine Print
+        run: |
+          git clone https://github.com/srikantl50193-dev/fine-print ../fine-print
+          git -C ../fine-print checkout "$FINE_PRINT_COMMIT"
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Type check
+        run: uv run ty check
+      - name: Test
+        run: uv run pytest --cov --cov-report=term-missing

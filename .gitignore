@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.env
+.DS_Store
+# Symlinks to ../fine-print, the embedding cache and fine-tuned models.
+data/
+models/

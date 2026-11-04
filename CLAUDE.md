@@ -1,0 +1,72 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Environment
+
+- `.venv` is managed by uv. Run things with `uv run ...` or through the Makefile.
+- Add dependencies with `uv add <package>` or `uv add --dev <package>`, which also update `uv.lock`.
+- Never use `pip` or `pip3`: on this machine `pip3` resolves to the global Python. Never install globally.
+- Python is pinned to 3.14.
+- This repo's git email is the GitHub noreply address, set in `.git/config`. The global setting is a personal address, so check `git config user.email` in any new clone.
+- Commit messages follow Conventional Commits.
+
+## Project
+
+Answers a client question: which embedding model should we use for our documents, and is fine-tuning worth it? Everything runs locally and free. The corpus is Fine Print's Terms of Service and privacy policies, with BEIR SciFact as an out-of-domain check.
+
+## Fine Print is read-only
+
+`../fine-print` is an editable path dependency and the source of the data. **Never write into it.**
+
+- `data/fine_print/` holds symlinks into it, so a write there lands in Fine Print. Only ever read from that folder.
+- Importing the package sets `sys.dont_write_bytecode`, because importing `fine_print` would otherwise write `.pyc` files there. Keep that first in `__init__.py`.
+- Import only `fine_print.chunking`, `.ingest`, `.models` and `.config`. `.evaluate`, `.store` and `.embed` load chromadb or torch.
+- Chunk settings are read from Fine Print's field defaults (`corpus.chunk_settings`), not repeated here.
+- The chunker is editable, so a change in Fine Print changes the chunks. The chunk fingerprint and Fine Print's commit are recorded in `data/manifest.json`. `make data-verify` fails if either the chunks or any file in the tree changed, and must pass after every step.
+- Run git there with `--no-optional-locks`, which stops status commands writing to its index.
+- The one exception is the final integration experiment, which uses a new branch in a separate worktree and is never merged.
+
+## Sharing downloads
+
+- Models and SciFact come from the shared Hugging Face cache, and Ollama models from its own store. Never set a custom cache directory.
+- Report what is cached and the extra disk needed before downloading models.
+- Reuse Fine Print's bge-small vectors only if they are provably identical: same model revision, settings and chunk text. Its Chroma collections don't record a model or revision, so today they fail that test and are recomputed.
+
+## Memory
+
+This machine has 16 GB of RAM, and `gemma4:e4b` needs 6-7 GB.
+
+- Run `uv run emb-bench preflight benchmark` or `preflight generation` before benchmarks, training or synthetic generation. If Fine Print's API or UI is running, ask the user to stop it. Never stop it yourself.
+- Never run Ollama generation at the same time as a benchmark or training.
+- Report peak RAM for each step.
+
+## Evaluation rules
+
+- **Choose models and settings on the tuning set only** (`data/fine_print/tuning_questions.jsonl`).
+- **Run the held-out set once, at the very end,** for the final 2-3 configurations, and report it as-is. Change nothing because of what it shows.
+- **Don't read held-out questions except for the leakage check.** Counting and hashing them is fine.
+- **`eval/holdout/` in Fine Print is already spent:** it was scored for its v2 and v3, and those scores are in its README. Never present it here as a clean held-out estimate.
+- **No eval question, tuning or held-out, may appear in training data.** Drop synthetic queries that are near-duplicates of eval questions, and report how many were dropped.
+- **Report the number of questions with every result,** and say when a gap is within one or two questions, which is likely noise. One question is 3.2 points on the tuning set (31) and 5 points on the Fine Print held-out set (20).
+- **Selection rule, fixed before any results:** the highest tuning recall@5 wins. Between configurations within two questions of each other, the smaller and faster one wins.
+- Fine Print's "recall@k" means at least one chunk in the top k from the right document and containing every keyword. Label it that way. SciFact uses standard BEIR recall.
+
+## Commands
+
+```bash
+make setup        # create or repair .venv from uv.lock, and install the git hooks
+make check        # lint, typecheck and test, as CI does
+make env          # hardware, MPS, Ollama, and what's in the shared cache
+make data         # symlink Fine Print's data, write the manifest, fetch SciFact
+make data-verify  # check Fine Print hasn't changed
+uv run pytest tests/test_x.py::test_y   # a single test
+```
+
+Tests use no network, models, Ollama or real data, only tiny fakes. They do need `../fine-print`, because the chunker is imported from it. CI clones Fine Print at a pinned commit and installs CPU-only torch on Linux.
+
+## Status
+
+- **Done:** setup, data.
+- **Waiting for the user:** which held-out set to use, EmbeddingGemma access, `trust_remote_code` for Nomic, and whether to add the unseen-companies test.
+- **Next:** baseline benchmark. It should reproduce Fine Print's tuning scores: Recall@1 0.58, Recall@5 0.65, Recall@10 0.68, MRR 0.618 on 1,581 chunks.

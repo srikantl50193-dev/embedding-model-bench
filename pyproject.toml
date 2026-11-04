@@ -1,0 +1,92 @@
+[project]
+name = "embedding-model-bench"
+version = "0.1.0"
+description = "Which embedding model should a client use for their documents, and is fine-tuning worth it?"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fine-print",
+    "httpx>=0.28.1",
+    "huggingface-hub>=2.4.0",
+    "numpy>=2.5.4",
+    "psutil>=7.2.2",
+    "pyarrow>=26.0.1",
+    "pydantic>=2.14.2",
+    "pydantic-settings>=2.16.2",
+    "sentence-transformers>=6.2.0",
+    "structlog>=26.1.0",
+    "torch>=2.15.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+emb-bench = "embedding_model_bench.cli:app"
+
+[build-system]
+requires = ["hatchling>=1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/embedding_model_bench"]
+
+[tool.uv.sources]
+# Linux gets the CPU-only torch build, so CI doesn't download the CUDA libraries.
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+fine-print = { path = "../fine-print", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "PL", "D"]
+ignore = [
+    "D203", # Conflicts with D211 (no blank line before a class docstring).
+    "D213", # Conflicts with D212 (summary on the first docstring line).
+    "D105", # Dunder methods are self-explanatory.
+    "D107", # __init__ is documented on its class.
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Docstrings are required for public APIs in src/, not for tests or one-off scripts.
+"tests/**" = ["D", "PLR2004"]
+"scripts/**" = ["D102", "D103"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pylint]
+max-args = 7
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+include = ["src", "tests", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["embedding_model_bench"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+    "ty>=0.0.97",
+]
