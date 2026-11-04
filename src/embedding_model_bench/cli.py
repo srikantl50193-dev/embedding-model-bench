@@ -1,14 +1,18 @@
 """The command line interface. Heavy libraries are imported inside commands, to start quickly."""
 
 import platform
+import subprocess
 import sys
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import psutil
 import typer
 
 from embedding_model_bench.config import get_settings
 from embedding_model_bench.preflight import HeavyStep, run_preflight
+
+if TYPE_CHECKING:
+    from embedding_model_bench.models import BenchmarkResult
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -80,14 +84,12 @@ def data_verify() -> None:
     typer.echo(f"Fine Print is unchanged ({manifest.num_chunks} chunks).")
 
 
-@app.command()
-def baseline() -> None:
-    """Measure bge-small and check that it reproduces Fine Print's published tuning scores."""
+def _measure(spec_key: str) -> BenchmarkResult:
+    """Run the preflight checks and measure one model, in this process."""
     from embedding_model_bench.benchmark import (  # noqa: PLC0415
         BenchmarkInputs,
         load_tuning_questions,
         run_benchmark,
-        summary_table,
     )
     from embedding_model_bench.corpus import load_chunks  # noqa: PLC0415
     from embedding_model_bench.data import (  # noqa: PLC0415
@@ -97,7 +99,7 @@ def baseline() -> None:
     )
     from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
     from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
-    from embedding_model_bench.registry import BGE_SMALL  # noqa: PLC0415
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
     from embedding_model_bench.scifact import load_scifact  # noqa: PLC0415
 
     settings = get_settings()
@@ -116,8 +118,8 @@ def baseline() -> None:
     _, chunks = load_chunks(link_dir / "raw")
     questions = load_tuning_questions(link_dir / "tuning_questions.jsonl")
     with heavy_step(settings.results_dir / ".heavy.lock"):
-        result = run_benchmark(
-            BGE_SMALL,
+        return run_benchmark(
+            MODELS[spec_key],
             BenchmarkInputs(
                 chunks=chunks,
                 questions=questions,
@@ -128,10 +130,29 @@ def baseline() -> None:
             settings.data_dir / "embeddings",
             SentenceTransformerEncoder,
             _devices(),
-            log=lambda message: typer.echo(message, err=True),
+            log=lambda message: typer.echo(f"[{spec_key}] {message}", err=True),
         )
 
-    out_dir = settings.results_dir / "baseline"
+
+def _report_provisional(result: BenchmarkResult) -> None:
+    """Say so if competing apps or low memory mean the timings can't be final."""
+    if result.machine.timings_provisional:
+        apps = ", ".join(result.machine.competing_apps) or "none"
+        typer.echo(
+            f"[{result.spec.key}] Timings are PROVISIONAL: competing apps: {apps}, "
+            f"{result.machine.available_gb} GB available, "
+            f"{result.machine.swap_used_gb} GB swap in use."
+        )
+
+
+@app.command()
+def baseline() -> None:
+    """Measure bge-small and check that it reproduces Fine Print's published tuning scores."""
+    from embedding_model_bench.benchmark import summary_table  # noqa: PLC0415
+    from embedding_model_bench.registry import BGE_SMALL  # noqa: PLC0415
+
+    result = _measure(BGE_SMALL.key)
+    out_dir = get_settings().results_dir / "baseline"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{BGE_SMALL.key}.json").write_text(
         result.model_dump_json(indent=2) + "\n", encoding="utf-8"
@@ -152,13 +173,70 @@ def baseline() -> None:
         digits = 3 if name == "MRR" else 2
         status = "ok" if round(measured[name], digits) == published else "DIFFERENT"
         typer.echo(f"[{status}] {name}: measured {measured[name]:.3f}, Fine Print {published}")
-    if result.machine.timings_provisional:
-        apps = ", ".join(result.machine.competing_apps) or "none"
-        typer.echo(
-            f"Timings are PROVISIONAL: competing apps: {apps}, "
-            f"{result.machine.available_gb} GB available, "
-            f"{result.machine.swap_used_gb} GB swap in use."
-        )
+    _report_provisional(result)
+
+
+@app.command(name="benchmark-one", hidden=True)
+def benchmark_one(key: str) -> None:
+    """Measure one model. `benchmark` runs this once per process, to isolate peak memory."""
+    result = _measure(key)
+    out_dir = get_settings().results_dir / "models"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{key}.json").write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    _report_provisional(result)
+
+
+@app.command()
+def benchmark(
+    model: Annotated[
+        list[str] | None, typer.Option(help="Only these models. Defaults to all of them.")
+    ] = None,
+) -> None:
+    """Measure the models, one process each. Rerunning is quick, and re-measures the timings."""
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    keys = model or list(MODELS)
+    unknown = [key for key in keys if key not in MODELS]
+    if unknown:
+        typer.echo(f"Unknown models: {', '.join(unknown)}. Known: {', '.join(MODELS)}", err=True)
+        raise typer.Exit(1)
+    failed = []
+    for key in keys:
+        command = [sys.executable, "-m", "embedding_model_bench.cli", "benchmark-one", key]
+        if subprocess.run(command, check=False).returncode != 0:
+            failed.append(key)
+    write_model_summary()
+    if failed:
+        typer.echo(f"Failed: {', '.join(failed)}", err=True)
+        raise typer.Exit(1)
+
+
+def write_model_summary() -> None:
+    """Rebuild the tables and report the current leader from every saved result."""
+    from embedding_model_bench.benchmark import summary_table  # noqa: PLC0415
+    from embedding_model_bench.compare import (  # noqa: PLC0415
+        apply_selection_rule,
+        comparison_table,
+    )
+    from embedding_model_bench.models import BenchmarkResult  # noqa: PLC0415
+    from embedding_model_bench.registry import BGE_SMALL, MODELS  # noqa: PLC0415
+
+    out_dir = get_settings().results_dir / "models"
+    paths = [out_dir / f"{key}.json" for key in MODELS if (out_dir / f"{key}.json").exists()]
+    results = [
+        BenchmarkResult.model_validate_json(path.read_text(encoding="utf-8")) for path in paths
+    ]
+    if not results:
+        return
+    report = summary_table(results)
+    if any(r.spec.key == BGE_SMALL.key for r in results):
+        report += "\n" + comparison_table(results, BGE_SMALL.key)
+    leader = apply_selection_rule(results)
+    report += f"\nSelection rule, on these models only: {leader.spec.key}.\n"
+    if any(r.machine.timings_provisional for r in results):
+        report += "\nTimings are provisional: competing apps were open or memory was low.\n"
+    (out_dir / "summary.md").write_text(report, encoding="utf-8")
+    typer.echo(report)
 
 
 def _devices() -> list[str]:
@@ -178,3 +256,7 @@ def preflight(
         typer.echo(f"[{'ok' if check.ok else 'STOP'}] {check.name}: {check.detail}")
     if not all(check.ok for check in checks):
         raise typer.Exit(1)
+
+
+if __name__ == "__main__":
+    app()

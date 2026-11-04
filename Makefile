@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck test check env data data-verify baseline
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark
 
 setup:
 	bash scripts/setup.sh
@@ -30,3 +30,6 @@ data-verify:
 
 baseline:
 	uv run emb-bench baseline
+
+benchmark:
+	uv run emb-bench benchmark

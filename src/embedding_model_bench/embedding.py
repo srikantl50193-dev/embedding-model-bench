@@ -16,7 +16,7 @@ import numpy as np
 from embedding_model_bench.models import ModelSpec
 
 BATCH_SIZE = 32  # Fine Print's embedding_batch_size.
-CACHE_FORMAT = 1
+CACHE_FORMAT = 2
 
 
 class Encoder(Protocol):
@@ -42,7 +42,8 @@ class SentenceTransformerEncoder:
     """A real model, loaded from the shared Hugging Face cache."""
 
     def __init__(self, spec: ModelSpec, device: str) -> None:
-        # Imported here because it loads torch, which would slow down every CLI command.
+        # Imported here because they load torch, which would slow down every CLI command.
+        import torch  # noqa: PLC0415
         from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
         self._spec = spec
@@ -54,6 +55,9 @@ class SentenceTransformerEncoder:
                 revision=spec.revision,
                 trust_remote_code=spec.trust_remote_code,
                 local_files_only=local_only,
+                # Some weights are stored in half precision, which would run slower on CPU
+                # and make the speed comparison partly about number formats.
+                model_kwargs={"dtype": torch.float32},
             )
 
         try:
@@ -95,6 +99,7 @@ def cache_key(spec: ModelSpec, prefix: str, texts: Sequence[str]) -> str:
         "revision": spec.revision,
         "prefix": prefix,
         "normalized": True,
+        "dtype": "float32",
     }
     digest.update(json.dumps(settings, sort_keys=True).encode())
     for text in texts:
