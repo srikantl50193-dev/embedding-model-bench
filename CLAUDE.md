@@ -64,6 +64,7 @@ make data         # symlink Fine Print's data, write the manifest, fetch SciFact
 make data-verify  # check Fine Print hasn't changed
 make baseline     # measure bge-small and compare it with Fine Print's published scores
 make benchmark    # measure every model, one process each; a rerun re-measures timings only
+make prefixes     # score each model with and without its prefixes
 uv run pytest tests/test_x.py::test_y   # a single test
 ```
 
@@ -71,8 +72,9 @@ Tests use no network, models, Ollama or real data, only tiny fakes. They do need
 
 ## Status
 
-- **Done:** setup, data, fresh held-out set frozen, baseline, model benchmark. bge-small reproduces Fine Print's published tuning scores, and SciFact nDCG@10 is within 0.011 of MTEB's for all six models. Results are in `results/models/`. Quality scores are final, but timings are provisional because Chrome was open.
+- **Done:** setup, data, fresh held-out set frozen, baseline, model benchmark, prefix ablation. bge-small reproduces Fine Print's published tuning scores, and SciFact nDCG@10 is within 0.011 of MTEB's for all six models. Results are in `results/models/`. Quality scores are final, but timings are provisional because Chrome was open.
 - **Decisions:** EmbeddingGemma was replaced by `intfloat/e5-base-v2`, because there is no Hugging Face login on this machine. Nomic runs without `trust_remote_code`, which current transformers doesn't need; the README must say so. The unseen-companies fine-tuning test is in, labelled as a rough signal of about 9 questions.
 - **Open question:** Granite scores 13/31 on tuning hit@5 but well on SciFact. It finds the right company and document, so the keyword test may be understating it. Don't report it as simply worse without saying this.
-- **Next:** prefix ablation. `make benchmark` must be rerun with Chrome closed before any timing is reported as final; embeddings come from the cache.
+- **Prefix finding:** keep prefixes as on each card. Only Arctic depends on its prefix, and no combination beat the card by more than noise. Results are in `results/prefixes/`.
+- **Next:** Matryoshka, then quantization. Nomic needs layer normalization before truncating, per its card. `make benchmark` must be rerun with Chrome closed before any timing is reported as final; embeddings come from the cache.
 - **Synthetic generation:** time 20 chunks first and report an estimate. The full run must be resumable, because the user will run it overnight.
