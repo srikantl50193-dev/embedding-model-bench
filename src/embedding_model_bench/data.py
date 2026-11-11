@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from fine_print.models import Chunk
+
 from embedding_model_bench.corpus import corpus_fingerprint, load_chunks
 from embedding_model_bench.models import DataManifest
 
@@ -96,10 +98,10 @@ def link_data(fine_print_dir: Path, data_dir: Path) -> Path:
 def tree_digest(fine_print_dir: Path) -> str:
     """Hash the path, size and modified time of every file, which detects any write."""
     digest = hashlib.sha256()
-    for root, dirs, files in os.walk(fine_print_dir):
+    for root, dirs, files in fine_print_dir.walk():
         dirs[:] = sorted(d for d in dirs if d not in UNWATCHED_DIRS)
         for name in sorted(files):
-            path = Path(root) / name
+            path = root / name
             stat = path.lstat()
             line = f"{path.relative_to(fine_print_dir)}\0{stat.st_size}\0{stat.st_mtime_ns}\n"
             digest.update(line.encode())
@@ -122,8 +124,13 @@ def build_manifest(fine_print_dir: Path, link_dir: Path) -> DataManifest:
 
     The held-out questions are hashed and counted but not parsed.
     """
+    return _manifest_and_chunks(fine_print_dir, link_dir)[0]
+
+
+def _manifest_and_chunks(fine_print_dir: Path, link_dir: Path) -> tuple[DataManifest, list[Chunk]]:
+    """Build the manifest, and return the chunks it was built from so they aren't made twice."""
     num_documents, chunks = load_chunks(link_dir / "raw")
-    return DataManifest(
+    manifest = DataManifest(
         fine_print_commit=_git(fine_print_dir, "rev-parse", "HEAD") or "unknown",
         fine_print_dirty=bool(_git(fine_print_dir, "status", "--porcelain")),
         file_sha256={name: _sha256(fine_print_dir / p) for name, p in FILES_TO_HASH.items()},
@@ -134,6 +141,7 @@ def build_manifest(fine_print_dir: Path, link_dir: Path) -> DataManifest:
         num_tuning_questions=_count_lines(link_dir / "tuning_questions.jsonl"),
         num_holdout_questions=_count_lines(link_dir / "holdout" / "questions.jsonl"),
     )
+    return manifest, chunks
 
 
 def save_manifest(manifest: DataManifest, data_dir: Path) -> Path:
@@ -143,11 +151,11 @@ def save_manifest(manifest: DataManifest, data_dir: Path) -> Path:
     return path
 
 
-def verify_manifest(fine_print_dir: Path, data_dir: Path) -> DataManifest:
+def verify_manifest(fine_print_dir: Path, data_dir: Path) -> tuple[DataManifest, list[Chunk]]:
     """Check that Fine Print hasn't changed since its data was linked.
 
     Returns:
-        The saved manifest.
+        The saved manifest, and the chunks, which had to be made to check it.
 
     Raises:
         FinePrintDataError: If there is no manifest, or the corpus, questions or tree changed.
@@ -156,7 +164,7 @@ def verify_manifest(fine_print_dir: Path, data_dir: Path) -> DataManifest:
     if not path.exists():
         raise FinePrintDataError(f"{path} doesn't exist. Run `emb-bench data` first.")
     saved = DataManifest.model_validate_json(path.read_text(encoding="utf-8"))
-    current = build_manifest(fine_print_dir, data_dir / LINK_FOLDER)
+    current, chunks = _manifest_and_chunks(fine_print_dir, data_dir / LINK_FOLDER)
     changed = [
         field
         for field in ("corpus_fingerprint", "file_sha256", "num_chunks", "tree_digest")
@@ -168,4 +176,4 @@ def verify_manifest(fine_print_dir: Path, data_dir: Path) -> DataManifest:
             "tree_digest differs and you ran Fine Print yourself, run `emb-bench data` again. "
             "Otherwise this project wrote to it, which is a bug."
         )
-    return saved
+    return saved, chunks

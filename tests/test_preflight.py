@@ -23,7 +23,7 @@ def listening_port() -> Iterator[int]:
 
 
 def fake_ollama(monkeypatch: pytest.MonkeyPatch, models: list[str]) -> None:
-    def get(url: str, timeout: float) -> httpx.Response:
+    def get(url: str, **_options: object) -> httpx.Response:
         body = {"models": [{"name": name} for name in models]}
         return httpx.Response(200, json=body, request=httpx.Request("GET", url))
 
@@ -61,7 +61,7 @@ def test_benchmark_passes_when_ollama_is_idle(monkeypatch: pytest.MonkeyPatch) -
 
 @pytest.mark.usefixtures("no_servers")
 def test_benchmark_passes_when_ollama_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(url: str, timeout: float) -> httpx.Response:
+    def refuse(*_args: object, **_options: object) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
     monkeypatch.setattr(preflight.httpx, "get", refuse)
@@ -76,7 +76,7 @@ def test_generation_needs_the_model_and_a_running_ollama(monkeypatch: pytest.Mon
     fake_ollama(monkeypatch, ["gemma4:e4b"])
     assert by_name("generation")["Ollama model"] is True
 
-    def refuse(url: str, timeout: float) -> httpx.Response:
+    def refuse(*_args: object, **_options: object) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
     monkeypatch.setattr(preflight.httpx, "get", refuse)

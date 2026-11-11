@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from math import comb
 
 from embedding_model_bench.models import BenchmarkResult, FrozenModel, RetrievalScores
+from embedding_model_bench.report import markdown_table
 
 SELECTION_K = 5
 NOISE_QUESTIONS = 2
@@ -50,24 +51,30 @@ def sign_test_p(wins: int, losses: int) -> float:
 
 
 def paired_comparison(
-    reference: RetrievalScores, other: RetrievalScores, k: int = SELECTION_K
+    reference: RetrievalScores,
+    other: RetrievalScores,
+    k: int = SELECTION_K,
+    rows: Sequence[int] | None = None,
 ) -> PairedComparison:
     """Count the questions only one of two models found in its top k.
+
+    Args:
+        reference: The model compared against.
+        other: The model being compared.
+        k: The cut-off.
+        rows: Only these questions, by index. Defaults to all of them.
 
     Raises:
         ValueError: If the two results don't cover the same number of questions.
     """
     if reference.num_queries != other.num_queries:
         raise ValueError("Results must cover the same questions to be compared")
-    wins = losses = 0
-    pairs = zip(reference.first_relevant_ranks, other.first_relevant_ranks, strict=True)
-    for reference_rank, other_rank in pairs:
-        reference_hit = reference_rank is not None and reference_rank <= k
-        other_hit = other_rank is not None and other_rank <= k
-        wins += other_hit and not reference_hit
-        losses += reference_hit and not other_hit
+    reference_hits, other_hits = reference.hit_flags(k), other.hit_flags(k)
+    chosen = range(reference.num_queries) if rows is None else rows
+    wins = sum(other_hits[i] and not reference_hits[i] for i in chosen)
+    losses = sum(reference_hits[i] and not other_hits[i] for i in chosen)
     return PairedComparison(
-        num_queries=reference.num_queries,
+        num_queries=len(chosen),
         k=k,
         wins=wins,
         losses=losses,
@@ -78,7 +85,7 @@ def paired_comparison(
 
 def hits_at(result: BenchmarkResult, k: int = SELECTION_K) -> int:
     """Return how many tuning questions a model found in its top k."""
-    return sum(rank is not None and rank <= k for rank in result.tuning.first_relevant_ranks)
+    return result.tuning.hits(k)
 
 
 def apply_selection_rule(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
@@ -98,23 +105,36 @@ def apply_selection_rule(results: Sequence[BenchmarkResult]) -> BenchmarkResult:
 def comparison_table(results: Sequence[BenchmarkResult], reference_key: str) -> str:
     """Render each model against the reference, and against MTEB's published SciFact score."""
     reference = next(r for r in results if r.spec.key == reference_key)
-    rows = [
-        f"Compared with {reference_key}, by question. Wins are questions found only by that "
-        "model; losses are questions found only by the reference.",
-        "",
-        "| Model | Tuning hit@5 | Wins / losses (n=31) | Sign test p | Within noise? "
-        "| SciFact wins / losses (n=300) | SciFact nDCG@10 | MTEB nDCG@10 |",
-        "|" + " --- |" * 8,
+    tuning_n, scifact_n = reference.tuning.num_queries, reference.scifact.num_queries
+    headers = [
+        "Model",
+        "Tuning hit@5",
+        f"Wins / losses (n={tuning_n})",
+        "Sign test p",
+        "Within noise?",
+        f"SciFact wins / losses (n={scifact_n})",
+        "SciFact nDCG@10",
+        "MTEB nDCG@10",
     ]
+    rows = []
     for result in results:
         tuning = paired_comparison(reference.tuning, result.tuning)
         scifact = paired_comparison(reference.scifact, result.scifact)
         mteb = MTEB_SCIFACT_NDCG.get(result.spec.key)
         rows.append(
-            f"| {result.spec.key} | {hits_at(result)}/{result.tuning.num_queries} "
-            f"| {tuning.wins} / {tuning.losses} | {tuning.sign_test_p:.3f} "
-            f"| {'yes' if tuning.within_noise else 'no'} "
-            f"| {scifact.wins} / {scifact.losses} | {result.scifact.ndcg_at_10:.3f} "
-            f"| {f'{mteb:.3f}' if mteb is not None else 'n/a'} |"
+            [
+                result.spec.key,
+                f"{hits_at(result)}/{tuning_n}",
+                f"{tuning.wins} / {tuning.losses}",
+                f"{tuning.sign_test_p:.3f}",
+                "yes" if tuning.within_noise else "no",
+                f"{scifact.wins} / {scifact.losses}",
+                f"{result.scifact.ndcg_at_10:.3f}",
+                f"{mteb:.3f}" if mteb is not None else "n/a",
+            ]
         )
-    return "\n".join(rows) + "\n"
+    intro = (
+        f"Compared with {reference_key}, by question. Wins are questions found only by that "
+        "model; losses are questions found only by the reference.\n\n"
+    )
+    return intro + markdown_table(headers, rows)

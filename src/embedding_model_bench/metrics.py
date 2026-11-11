@@ -17,12 +17,10 @@ def is_relevant(text: str, company: str, doc_type: str, question: EvalQuestion) 
 
     Ported because `fine_print.evaluate` loads chromadb. Case and line breaks are ignored.
     """
+    if (company, doc_type) != (question.company, question.doc_type):
+        return False
     normalized = " ".join(text.lower().split())
-    return (
-        company == question.company
-        and doc_type == question.doc_type
-        and all(keyword.lower() in normalized for keyword in question.keywords)
-    )
+    return all(keyword.lower() in normalized for keyword in question.keywords)
 
 
 def top_k(queries: np.ndarray, documents: np.ndarray, k: int) -> np.ndarray:

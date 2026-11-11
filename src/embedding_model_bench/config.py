@@ -5,7 +5,7 @@ cache and the Ollama store, so nothing is downloaded twice. Chunking settings ar
 because they are read from Fine Print (see `corpus.py`).
 """
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from pydantic import Field
@@ -17,7 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     """Application settings. Defaults work when fine-print is a sibling of this repo."""
 
-    model_config = SettingsConfigDict(env_prefix="EMB_BENCH_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="EMB_BENCH_", env_file=PROJECT_ROOT / ".env", extra="ignore"
+    )
 
     # Paths
     fine_print_dir: Path = PROJECT_ROOT.parent / "fine-print"
@@ -47,7 +49,7 @@ class Settings(BaseSettings):
     ollama_generate_timeout: float = Field(default=300.0, gt=0)
 
 
-@lru_cache(maxsize=1)
+@cache
 def get_settings() -> Settings:
     """Return the process-wide settings, reading the environment only once."""
     return Settings()

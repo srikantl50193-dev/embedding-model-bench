@@ -65,7 +65,7 @@ def test_a_second_run_resumes_where_the_first_stopped(tmp_path: Path) -> None:
 def test_the_estimate_leaves_out_the_first_request_which_loads_the_model(tmp_path: Path) -> None:
     times = iter([30.0, 2.0, 4.0])
 
-    def timed(chunk: Chunk) -> Generated:
+    def timed(_chunk: Chunk) -> Generated:
         return Generated(questions=["Q?"], seconds=next(times), output_tokens=1)
 
     summary = run(tmp_path / "q.jsonl", limit=3, generate=timed)

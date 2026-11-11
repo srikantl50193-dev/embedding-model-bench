@@ -58,7 +58,7 @@ This machine has 16 GB of RAM, and `gemma4:e4b` needs 6-7 GB.
 
 ```bash
 make setup        # create or repair .venv from uv.lock, and install the git hooks
-make check        # lint (ruff), typecheck (ty) and test (pytest with coverage), as CI does
+make check        # lint (ruff), typecheck (ty) and test (pytest, coverage at least 70%), as CI does
 make format       # ruff fix and format
 make env          # hardware, MPS, Ollama, and what's in the shared cache
 make data         # symlink Fine Print's data, write the manifest, fetch SciFact
@@ -75,14 +75,19 @@ Tests use no network, models, Ollama or real data, only tiny fakes. They do need
 ## Architecture
 
 - **`cli.py`** is the entry point (`emb-bench`, built with Typer). It imports torch and sentence-transformers inside each command, so `--help` and `preflight` start fast. Keep heavy imports out of module scope there.
-- **One process per model.** `benchmark` and `prefixes` run the hidden `benchmark-one` and `prefixes-one` commands as subprocesses, so each model's peak RAM is measured alone and its memory is freed afterwards. Each writes `results/<step>/<model>.json`, then the parent writes `summary.md`.
-- **Heavy-step lock.** Model work runs inside `machine.heavy_step(results/.heavy.lock)`, which refuses to start while another live process holds the lock. Synthetic generation and training must use the same lock.
+- **One process per model or run.** `benchmark`, `prefixes` and `finetune` run hidden `*-one` commands as subprocesses (`cli._run_each`), so each model's peak RAM is measured alone and its memory is freed afterwards. Each writes `results/<step>/<model>.json`, then the parent writes `summary.md`.
+- **Heavy-step lock.** Model work runs inside `machine.heavy_step(results/.heavy.lock)`, an OS `flock` that refuses while another process holds it. The kernel releases it when the holder dies, so a leftover file never blocks. Synthetic generation and training use the same lock.
 - **Vector cache** (`embedding.embed_cached`, in `data/embeddings/`). The key hashes the repo, revision, prefix and exact text. That is why reruns only re-measure timings, and why `matryoshka` needs no model. Prefixes are added in `embed_cached`, not through sentence-transformers' `prompts`, so the key covers them. Files are written to a temporary name and then renamed.
 - **Models** are pinned to exact revisions in `registry.py` (`MODELS`). Add a model there, not in the CLI.
 - **Scoring:** `metrics.py` does exact search, Fine Print's keyword recall@k and BEIR metrics. `compare.py` does paired per-question comparisons and `noise_note`, the "within N questions" wording. Use these for any new experiment, not ad hoc comparisons.
 - **Data:** `corpus.py` chunks with Fine Print's own code and fingerprints the result. `data.py` creates the symlinks and writes and checks `data/manifest.json`. `scifact.py` reads pinned SciFact revisions from the HF cache.
 - **Settings** are in `config.py` and can be overridden with `EMB_BENCH_*` or `.env`. The fresh held-out file's SHA-256 is pinned there.
-- **Experiment modules** (`benchmark.py`, `prefixes.py`, `matryoshka.py`) take an `EncoderFactory` or `Callable[[], Encoder]` and load the model only on a cache miss, so tests can pass a fake encoder.
+- **Experiment modules** take an `EncoderFactory` or `Callable[[], Encoder]` and load the model only on a cache miss, so tests can pass a fake encoder. Build on the shared pieces rather than repeating them:
+  - `embedding.cached_embedder` embeds through the cache and loads the model at most once.
+  - `benchmark.BenchmarkInputs` computes texts and relevance sets once per process; `encode_inputs` and `score_encoded` encode and score both corpora, with an optional transform such as truncation.
+  - `models.RetrievalScores.hits(k)` / `hit_flags(k)` count hits; `compare.paired_comparison(..., rows=)` compares on a subset.
+  - `report.markdown_table` renders every summary; `files.read_json`, `read_jsonl`, `write_json` and `write_jsonl` read and write pydantic models.
+- **Regression check after refactors:** recompute results from the cache with a factory that raises on a cache miss, and compare with the committed JSON. Quality fields must match exactly; only timings, peak RSS and machine state may differ. FAISS code must run in a separate process from anything that loads torch.
 
 ## Status
 

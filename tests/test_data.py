@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -35,7 +34,7 @@ def test_links_are_relative_symlinks_to_the_sources(fine_print_tree: Path, tmp_p
     link_dir = link_data(fine_print_tree, tmp_path / "data")
     raw = link_dir / "raw"
     assert raw.is_symlink()
-    assert not os.path.isabs(os.readlink(raw))
+    assert not raw.readlink().is_absolute()
     assert raw.resolve() == (fine_print_tree / "data" / "raw").resolve()
 
 
@@ -73,7 +72,8 @@ def test_verify_passes_when_unchanged_and_fails_after_a_write(
 ) -> None:
     data_dir = tmp_path / "data"
     save_manifest(build_manifest(fine_print_tree, link_data(fine_print_tree, data_dir)), data_dir)
-    assert verify_manifest(fine_print_tree, data_dir).num_chunks == 2
+    manifest, chunks = verify_manifest(fine_print_tree, data_dir)
+    assert manifest.num_chunks == len(chunks) == 2
 
     (fine_print_tree / "eval" / "questions.jsonl").write_text("{}\n", encoding="utf-8")
     with pytest.raises(FinePrintDataError, match="file_sha256"):

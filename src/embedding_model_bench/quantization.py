@@ -20,21 +20,26 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from enum import StrEnum
-from functools import cache
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import numpy as np
 
-from embedding_model_bench.benchmark import BenchmarkInputs, scifact_relevant, tuning_relevant
-from embedding_model_bench.compare import PairedComparison, noise_note, paired_comparison
-from embedding_model_bench.embedding import Encoder, embed_cached
+from embedding_model_bench.benchmark import BenchmarkInputs, encode_inputs
+from embedding_model_bench.compare import (
+    SELECTION_K,
+    PairedComparison,
+    noise_note,
+    paired_comparison,
+)
+from embedding_model_bench.embedding import Encoder, cached_embedder
 from embedding_model_bench.machine import machine_state, peak_rss_mb
 from embedding_model_bench.matryoshka import truncate
 from embedding_model_bench.metrics import DEEPEST, score
 from embedding_model_bench.models import FrozenModel, MachineState, ModelSpec, RetrievalScores
 from embedding_model_bench.registry import ARCTIC_M, BGE_BASE, BGE_SMALL
+from embedding_model_bench.report import markdown_table
 
 RESCORE_MULTIPLIER = 4
 # Extra results fetched so that exact ties at the cut-off can be ordered by index.
@@ -140,41 +145,48 @@ class SearchIndex:
         faiss = load_faiss()
         self.scheme = scheme
         self.dim = documents.shape[1]
-        self._documents = np.ascontiguousarray(documents, dtype=np.float32)
+        self._count = documents.shape[0]
+        vectors = np.ascontiguousarray(documents, dtype=np.float32)
+        # Only rescoring with float32 vectors needs them kept beside the index. Keeping them for
+        # every scheme would inflate the peak memory recorded with the results.
+        self._documents = vectors if scheme == Scheme.BINARY_RESCORE_FLOAT else None
         self._index: Any
         if scheme == Scheme.FLOAT32:
             self._index = faiss.IndexFlatIP(self.dim)
-            self._index.add(self._documents)
+            self._index.add(vectors)
         elif scheme == Scheme.INT8:
             self._index = faiss.IndexScalarQuantizer(
                 self.dim, faiss.ScalarQuantizer.QT_8bit, faiss.METRIC_INNER_PRODUCT
             )
-            self._index.train(self._documents)
-            self._index.add(self._documents)
+            self._index.train(vectors)
+            self._index.add(vectors)
         else:
-            self._bits = binarize(self._documents)
+            self._bits = binarize(vectors)
             self._index = faiss.IndexBinaryFlat(self.dim)
             self._index.add(self._bits)
 
     def search(self, queries: np.ndarray, k: int) -> np.ndarray:
         """Return the indexes of each query's k best documents, best first.
 
-        Exact ties go to the lower index, as in `metrics.top_k`. The corpus has identical chunks
-        in different documents, so without this, float32 here wouldn't reproduce the benchmark.
+        Exact ties go to the lower index, as in `metrics.top_k`, among the results FAISS returns.
+        The corpus has identical chunks in different documents, so without this, float32 here
+        wouldn't reproduce the benchmark. Binary distances are small integers and tie often; when
+        more documents tie at the cut-off than the margin holds, FAISS decides which are returned.
         """
         queries = np.ascontiguousarray(queries, dtype=np.float32)
-        count = self._documents.shape[0]
-        if self.scheme in (Scheme.FLOAT32, Scheme.INT8):
-            scores, ids = self._index.search(queries, min(k + TIE_MARGIN, count))
+        depth = min(k + TIE_MARGIN, self._count)
+        if self.scheme in {Scheme.FLOAT32, Scheme.INT8}:
+            scores, ids = self._index.search(queries, depth)
             return np.stack([_best_first(i, -s, k) for s, i in zip(scores, ids, strict=True)])
         if self.scheme == Scheme.BINARY:
-            distances, ids = self._index.search(binarize(queries), min(k + TIE_MARGIN, count))
+            distances, ids = self._index.search(binarize(queries), depth)
             return np.stack([_best_first(i, d, k) for d, i in zip(distances, ids, strict=True)])
-        depth = min(k * RESCORE_MULTIPLIER, count)
-        candidates = self._index.search(binarize(queries), depth)[1]
+        candidates = self._index.search(
+            binarize(queries), min(k * RESCORE_MULTIPLIER, self._count)
+        )[1]
         ranked = []
         for query, ids in zip(queries, candidates, strict=True):
-            if self.scheme == Scheme.BINARY_RESCORE_QUERY:
+            if self._documents is None:
                 scores = unpack_signs(self._bits[ids], self.dim) @ query
             else:
                 scores = self._documents[ids] @ query
@@ -247,26 +259,23 @@ def run_quantization(
         Each scheme's results, compared with float32 at the same length.
     """
     machine = machine_state()
-    encoder = cache(load_encoder)
-
-    def embed(texts: Sequence[str], prefix: str) -> np.ndarray:
-        vectors = embed_cached(spec, texts, prefix, cache_dir, encoder)[0]
-        return vectors if dim == spec.dim else truncate(vectors, dim)
-
-    chunks = embed([c.embedding_text() for c in inputs.chunks], spec.passage_prefix)
-    questions = embed([q.question for q in inputs.questions], spec.query_prefix)
-    documents = embed(list(inputs.scifact.corpus.values()), spec.passage_prefix)
-    queries = embed(list(inputs.scifact.queries.values()), spec.query_prefix)
-    tuning_sets = tuning_relevant(inputs.chunks, inputs.questions)
-    scifact_sets = scifact_relevant(inputs.scifact)
+    embed = cached_embedder(spec, cache_dir, load_encoder)
+    full = encode_inputs(inputs, embed, spec.query_prefix, spec.passage_prefix)
+    chunks, questions, documents, queries = (
+        vectors if dim == spec.dim else truncate(vectors, dim)
+        for vectors in (full.chunks, full.questions, full.documents, full.queries)
+    )
     load_faiss().omp_set_num_threads(SEARCH_THREADS)
 
     scored = []
     for scheme in Scheme:
         log(f"{dim} dims, {scheme}")
-        tuning = score(SearchIndex(scheme, chunks).search(questions, DEEPEST).tolist(), tuning_sets)
+        tuning = score(
+            SearchIndex(scheme, chunks).search(questions, DEEPEST).tolist(), inputs.tuning_relevant
+        )
         scifact = score(
-            SearchIndex(scheme, documents).search(queries, DEEPEST).tolist(), scifact_sets
+            SearchIndex(scheme, documents).search(queries, DEEPEST).tolist(),
+            inputs.scifact_relevant,
         )
         p50, p95 = time_search(scheme, documents, queries[:LATENCY_QUERIES], latency_corpus)
         scored.append((scheme, tuning, scifact, p50, p95))
@@ -287,12 +296,13 @@ def run_quantization(
                 scifact=scifact,
                 tuning_vs_float32=paired_comparison(float_tuning, tuning),
                 scifact_vs_float32=paired_comparison(float_scifact, scifact),
-                memory_bytes_per_vector=bytes_per_vector(scheme, dim)[0],
-                disk_bytes_per_vector=bytes_per_vector(scheme, dim)[1],
+                memory_bytes_per_vector=memory,
+                disk_bytes_per_vector=disk,
                 search_p50_ms=round(p50, 3),
                 search_p95_ms=round(p95, 3),
             )
             for scheme, tuning, scifact, p50, p95 in scored
+            for memory, disk in [bytes_per_vector(scheme, dim)]
         ],
         peak_rss_mb=round(peak_rss_mb(), 1),
         machine=machine,
@@ -306,7 +316,7 @@ def quantization_table(results: Sequence[QuantizationResult]) -> str:
         "Dims",
         "Scheme",
         "Memory B/vector",
-        "Tuning hit@5",
+        f"Tuning hit@{SELECTION_K}",
         "Wins / losses",
         "MRR",
         "SciFact nDCG@10",
@@ -314,32 +324,30 @@ def quantization_table(results: Sequence[QuantizationResult]) -> str:
         "p",
         "Search p95 ms",
     ]
-    rows = ["| " + " | ".join(headers) + " |", "|" + " --- |" * len(headers)]
-    for result in results:
-        for s in result.schemes:
-            tuning, scifact = s.tuning_vs_float32, s.scifact_vs_float32
-            hits = sum(r is not None and r <= tuning.k for r in s.tuning.first_relevant_ranks)
-            cells = [
-                result.spec.key,
-                str(result.dim),
-                s.scheme.value,
-                f"{s.memory_bytes_per_vector:,.0f}",
-                f"{hits}/{s.tuning.num_queries}",
-                f"{tuning.wins} / {tuning.losses}",
-                f"{s.tuning.mrr:.3f}",
-                f"{s.scifact.ndcg_at_10:.3f}",
-                f"{scifact.wins} / {scifact.losses}",
-                f"{scifact.sign_test_p:.3f}",
-                f"{s.search_p95_ms:.2f}",
-            ]
-            rows.append("| " + " | ".join(cells) + " |")
+    rows = [
+        [
+            result.spec.key,
+            result.dim,
+            s.scheme.value,
+            f"{s.memory_bytes_per_vector:,.0f}",
+            f"{s.tuning.hits(SELECTION_K)}/{s.tuning.num_queries}",
+            f"{s.tuning_vs_float32.wins} / {s.tuning_vs_float32.losses}",
+            f"{s.tuning.mrr:.3f}",
+            f"{s.scifact.ndcg_at_10:.3f}",
+            f"{s.scifact_vs_float32.wins} / {s.scifact_vs_float32.losses}",
+            f"{s.scifact_vs_float32.sign_test_p:.3f}",
+            f"{s.search_p95_ms:.2f}",
+        ]
+        for result in results
+        for s in result.schemes
+    ]
+    footer = []
     if results:
         first = results[0]
-        rows += [
-            "",
+        footer = [
             noise_note(first.schemes[0].tuning.num_queries),
             f"Search times: one query at a time over {first.latency_corpus_size:,} vectors, "
             f"{first.search_threads} thread, exact FAISS indexes, {first.latency_queries} "
             "SciFact queries. They exclude encoding the query.",
         ]
-    return "\n".join(rows) + "\n"
+    return markdown_table(headers, rows, footer)

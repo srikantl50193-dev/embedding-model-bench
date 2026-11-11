@@ -6,17 +6,22 @@ as controls: bge-base leads so far, so it matters whether it could be shortened 
 """
 
 from collections.abc import Callable, Sequence
-from functools import cache
 from pathlib import Path
 
 import numpy as np
 
-from embedding_model_bench.benchmark import BenchmarkInputs, score_scifact, score_tuning
-from embedding_model_bench.compare import PairedComparison, noise_note, paired_comparison
-from embedding_model_bench.embedding import Encoder, embed_cached
+from embedding_model_bench.benchmark import BenchmarkInputs, encode_inputs, score_encoded
+from embedding_model_bench.compare import (
+    SELECTION_K,
+    PairedComparison,
+    noise_note,
+    paired_comparison,
+)
+from embedding_model_bench.embedding import Encoder, cached_embedder
 from embedding_model_bench.machine import peak_rss_mb
 from embedding_model_bench.models import FrozenModel, ModelSpec, RetrievalScores
 from embedding_model_bench.registry import ARCTIC_M, BGE_BASE, BGE_SMALL, NOMIC
+from embedding_model_bench.report import markdown_table
 
 BYTES_PER_FLOAT32 = 4
 MB = 1_000_000
@@ -117,32 +122,17 @@ def run_matryoshka(
     Returns:
         The scores at each length, each compared with the full length.
     """
-    encoder = cache(load_encoder)
-
-    def embed(texts: Sequence[str], prefix: str) -> np.ndarray:
-        return embed_cached(spec, texts, prefix, cache_dir, encoder)[0]
-
-    chunks = embed([c.embedding_text() for c in inputs.chunks], spec.passage_prefix)
-    questions = embed([q.question for q in inputs.questions], spec.query_prefix)
-    document_ids, query_ids = list(inputs.scifact.corpus), list(inputs.scifact.queries)
-    documents = embed(list(inputs.scifact.corpus.values()), spec.passage_prefix)
-    queries = embed(list(inputs.scifact.queries.values()), spec.query_prefix)
-
-    def evaluate(short: Callable[[np.ndarray], np.ndarray]) -> tuple[RetrievalScores, ...]:
-        return (
-            score_tuning(short(questions), short(chunks), inputs.chunks, inputs.questions),
-            score_scifact(
-                short(queries), short(documents), query_ids, document_ids, inputs.scifact
-            ),
-        )
-
+    embed = cached_embedder(spec, cache_dir, load_encoder)
+    encoded = encode_inputs(inputs, embed, spec.query_prefix, spec.passage_prefix)
     # The reference is the benchmark's own setup, so it is left exactly as the model produced it.
-    full_tuning, full_scifact = evaluate(lambda vectors: vectors)
+    full_tuning, full_scifact = score_encoded(inputs, encoded)
     scored = [(spec.dim, full_tuning, full_scifact)]
     for dim in (d for d in dims if d < spec.dim):
         log(f"{dim} dimensions")
-        tuning, scifact = evaluate(
-            lambda vectors, d=dim: truncate(vectors, d, layer_norm=truncation.layer_norm)
+        tuning, scifact = score_encoded(
+            inputs,
+            encoded,
+            lambda vectors, d=dim: truncate(vectors, d, layer_norm=truncation.layer_norm),
         )
         scored.append((dim, tuning, scifact))
 
@@ -173,7 +163,7 @@ def matryoshka_table(results: Sequence[MatryoshkaResult]) -> str:
         "Trained to truncate?",
         "Dims",
         "MB per 1M vectors",
-        "Tuning hit@5",
+        f"Tuning hit@{SELECTION_K}",
         "Wins / losses",
         "p",
         "MRR",
@@ -181,25 +171,22 @@ def matryoshka_table(results: Sequence[MatryoshkaResult]) -> str:
         "SciFact wins / losses",
         "p",
     ]
-    rows = ["| " + " | ".join(headers) + " |", "|" + " --- |" * len(headers)]
-    for result in results:
-        for v in result.variants:
-            tuning, scifact = v.tuning_vs_full, v.scifact_vs_full
-            hits = sum(r is not None and r <= tuning.k for r in v.tuning.first_relevant_ranks)
-            cells = [
-                result.spec.key,
-                "yes" if result.truncation.trained_for_truncation else "no",
-                str(v.dim),
-                f"{v.float32_mb_per_million:,.0f}",
-                f"{hits}/{v.tuning.num_queries}",
-                f"{tuning.wins} / {tuning.losses}",
-                f"{tuning.sign_test_p:.3f}",
-                f"{v.tuning.mrr:.3f}",
-                f"{v.scifact.ndcg_at_10:.3f}",
-                f"{scifact.wins} / {scifact.losses}",
-                f"{scifact.sign_test_p:.3f}",
-            ]
-            rows.append("| " + " | ".join(cells) + " |")
-    if results:
-        rows += ["", noise_note(results[0].variants[0].tuning.num_queries)]
-    return "\n".join(rows) + "\n"
+    rows = [
+        [
+            result.spec.key,
+            "yes" if result.truncation.trained_for_truncation else "no",
+            v.dim,
+            f"{v.float32_mb_per_million:,.0f}",
+            f"{v.tuning.hits(SELECTION_K)}/{v.tuning.num_queries}",
+            f"{v.tuning_vs_full.wins} / {v.tuning_vs_full.losses}",
+            f"{v.tuning_vs_full.sign_test_p:.3f}",
+            f"{v.tuning.mrr:.3f}",
+            f"{v.scifact.ndcg_at_10:.3f}",
+            f"{v.scifact_vs_full.wins} / {v.scifact_vs_full.losses}",
+            f"{v.scifact_vs_full.sign_test_p:.3f}",
+        ]
+        for result in results
+        for v in result.variants
+    ]
+    footer = [noise_note(results[0].variants[0].tuning.num_queries)] if results else []
+    return markdown_table(headers, rows, footer)

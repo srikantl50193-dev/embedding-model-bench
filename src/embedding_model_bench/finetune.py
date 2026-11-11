@@ -19,28 +19,25 @@ Two runs:
 
 import hashlib
 import itertools
-import json
 import random
 import shutil
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from functools import cache
 from pathlib import Path
 from typing import Any, cast
 
-import numpy as np
 from fine_print.models import Chunk
 
-from embedding_model_bench.benchmark import BenchmarkInputs, score_scifact, score_tuning
+from embedding_model_bench.benchmark import BenchmarkInputs, encode_inputs, score_encoded
 from embedding_model_bench.compare import (
     SELECTION_K,
     PairedComparison,
     noise_note,
     paired_comparison,
-    sign_test_p,
 )
-from embedding_model_bench.embedding import Encoder, embed_cached
+from embedding_model_bench.embedding import Encoder, cached_embedder
+from embedding_model_bench.files import read_jsonl
 from embedding_model_bench.models import (
     BenchmarkResult,
     EvalQuestion,
@@ -49,6 +46,7 @@ from embedding_model_bench.models import (
     RetrievalScores,
 )
 from embedding_model_bench.registry import BGE_SMALL
+from embedding_model_bench.report import markdown_table
 from embedding_model_bench.synthetic import text_sha256
 from embedding_model_bench.training_data import TrainingExample
 
@@ -70,7 +68,7 @@ class TrainConfig(FrozenModel):
     mini_batch_size: int = 8  # Only limits memory; the loss is the same as without caching.
     empty_cache_steps: int = 10  # Return PyTorch's cached GPU memory every this many steps.
     learning_rate: float = 2e-5
-    warmup_ratio: float = 0.1
+    warmup_ratio: float = 0.1  # Passed as transformers 5's warmup_steps, where below 1 is a ratio.
     evals_per_epoch: int = 2
     patience: int = 2
     max_steps: int = -1  # A positive value cuts training short, for a smoke test.
@@ -107,12 +105,11 @@ def choose_unseen_companies(questions: Sequence[EvalQuestion]) -> list[str]:
 
     Ties are broken at random with a fixed seed, so the choice doesn't depend on any result.
     """
-    counts: dict[str, int] = defaultdict(int)
-    for question in questions:
-        counts[question.company] += 1
+    counts = Counter(question.company for question in questions)
     combos = list(itertools.combinations(sorted(counts), UNSEEN_COUNT))
     gap = {c: abs(sum(counts[x] for x in c) - UNSEEN_TARGET_QUESTIONS) for c in combos}
-    best = [c for c in combos if gap[c] == min(gap.values())]
+    smallest = min(gap.values())
+    best = [c for c in combos if gap[c] == smallest]
     return list(random.Random(UNSEEN_SEED).choice(best))
 
 
@@ -173,12 +170,9 @@ def data_sha256(examples: Sequence[TrainingExample]) -> str:
 
 
 def file_sha256(path: Path) -> str:
-    """Hash a file in pieces."""
-    digest = hashlib.sha256()
+    """Hash a file without reading it into memory at once."""
     with path.open("rb") as file:
-        for block in iter(lambda: file.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def fine_tuned_spec(run: TrainingRun) -> ModelSpec:
@@ -279,7 +273,7 @@ def train(
         max_steps=config.max_steps,
         per_device_train_batch_size=config.batch_size,
         learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
+        warmup_steps=config.warmup_ratio,
         seed=config.seed,
         batch_sampler=BatchSamplers.NO_DUPLICATES,
         multi_dataset_batch_sampler=MultiDatasetBatchSamplers.PROPORTIONAL,
@@ -307,7 +301,9 @@ def train(
         callbacks=[EarlyStoppingCallback(early_stopping_patience=config.patience)],
     )
     before = evaluator(model)
-    history = [EvalPoint(step=0, epoch=0.0, ndcg_at_10=round(before[BEST_METRIC[5:]], 4))]
+    history = [
+        EvalPoint(step=0, epoch=0.0, ndcg_at_10=round(before[BEST_METRIC.removeprefix("eval_")], 4))
+    ]
     log(f"step 0: validation nDCG@10 {history[0].ndcg_at_10}")
     start = time.perf_counter()
     trainer.train()
@@ -346,8 +342,7 @@ def train(
 
 def load_examples(path: Path) -> list[TrainingExample]:
     """Read one split's examples."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [TrainingExample.model_validate(json.loads(line)) for line in lines if line.strip()]
+    return read_jsonl(path, TrainingExample)
 
 
 class SubsetComparison(FrozenModel):
@@ -382,26 +377,21 @@ def subset_comparison(
     questions: Sequence[EvalQuestion],
     baseline: RetrievalScores,
     model: RetrievalScores,
-    k: int = 5,
+    k: int = SELECTION_K,
 ) -> SubsetComparison:
     """Compare two models on the tuning questions about some companies."""
     rows = [i for i, q in enumerate(questions) if q.company in companies]
-
-    def hit(scores: RetrievalScores, row: int) -> bool:
-        rank = scores.first_relevant_ranks[row]
-        return rank is not None and rank <= k
-
-    wins = sum(hit(model, r) and not hit(baseline, r) for r in rows)
-    losses = sum(hit(baseline, r) and not hit(model, r) for r in rows)
+    paired = paired_comparison(baseline, model, k, rows)
+    baseline_hits, model_hits = baseline.hit_flags(k), model.hit_flags(k)
     return SubsetComparison(
         name=name,
         companies=sorted(companies),
-        num_queries=len(rows),
-        baseline_hits_at_5=sum(hit(baseline, r) for r in rows),
-        model_hits_at_5=sum(hit(model, r) for r in rows),
-        wins=wins,
-        losses=losses,
-        sign_test_p=round(sign_test_p(wins, losses), 4),
+        num_queries=paired.num_queries,
+        baseline_hits_at_5=sum(baseline_hits[i] for i in rows),
+        model_hits_at_5=sum(model_hits[i] for i in rows),
+        wins=paired.wins,
+        losses=paired.losses,
+        sign_test_p=paired.sign_test_p,
     )
 
 
@@ -415,24 +405,9 @@ def evaluate_fine_tuned(
 ) -> FineTuneResult:
     """Score a fine-tuned model exactly as the benchmark scores every model."""
     spec = fine_tuned_spec(run)
-    encoder = cache(lambda: load_encoder(spec))
-
-    def embed(texts: Sequence[str], prefix: str) -> np.ndarray:
-        return embed_cached(spec, texts, prefix, cache_dir, encoder)[0]
-
-    tuning = score_tuning(
-        embed([q.question for q in inputs.questions], spec.query_prefix),
-        embed([c.embedding_text() for c in inputs.chunks], spec.passage_prefix),
-        inputs.chunks,
-        inputs.questions,
-    )
-    scifact = score_scifact(
-        embed(list(inputs.scifact.queries.values()), spec.query_prefix),
-        embed(list(inputs.scifact.corpus.values()), spec.passage_prefix),
-        list(inputs.scifact.queries),
-        list(inputs.scifact.corpus),
-        inputs.scifact,
-    )
+    embed = cached_embedder(spec, cache_dir, lambda: load_encoder(spec))
+    encoded = encode_inputs(inputs, embed, spec.query_prefix, spec.passage_prefix)
+    tuning, scifact = score_encoded(inputs, encoded)
     seen = sorted({q.company for q in inputs.questions} - set(unseen))
     return FineTuneResult(
         run=run,
@@ -453,40 +428,69 @@ def evaluate_fine_tuned(
 
 def finetune_table(results: Sequence[FineTuneResult], baseline: BenchmarkResult) -> str:
     """Render each fine-tuned model beside the baseline, overall and by company group."""
-
-    def hits(scores: RetrievalScores) -> int:
-        return sum(r is not None and r <= SELECTION_K for r in scores.first_relevant_ranks)
-
     n = baseline.tuning.num_queries
-    rows = [
-        "| Model | Trained on | Tuning hit@5 | Wins / losses | p | MRR "
-        "| SciFact nDCG@10 | SciFact wins / losses | p |",
-        "|" + " --- |" * 9,
-        f"| {baseline.spec.key} (baseline) | - | {hits(baseline.tuning)}/{n} | - | - "
-        f"| {baseline.tuning.mrr:.3f} | {baseline.scifact.ndcg_at_10:.3f} | - | - |",
+    overall = [
+        [
+            f"{baseline.spec.key} (baseline)",
+            "-",
+            f"{baseline.tuning.hits(SELECTION_K)}/{n}",
+            "-",
+            "-",
+            f"{baseline.tuning.mrr:.3f}",
+            f"{baseline.scifact.ndcg_at_10:.3f}",
+            "-",
+            "-",
+        ]
     ]
     for r in results:
         excluded = r.run.config.excluded_companies
         trained = "all companies" if not excluded else f"all but {', '.join(sorted(excluded))}"
         t, s = r.tuning_vs_baseline, r.scifact_vs_baseline
-        rows.append(
-            f"| {r.spec.key} | {trained} | {hits(r.tuning)}/{n} | {t.wins} / {t.losses} "
-            f"| {t.sign_test_p:.3f} | {r.tuning.mrr:.3f} | {r.scifact.ndcg_at_10:.3f} "
-            f"| {s.wins} / {s.losses} | {s.sign_test_p:.3f} |"
+        overall.append(
+            [
+                r.spec.key,
+                trained,
+                f"{r.tuning.hits(SELECTION_K)}/{n}",
+                f"{t.wins} / {t.losses}",
+                f"{t.sign_test_p:.3f}",
+                f"{r.tuning.mrr:.3f}",
+                f"{r.scifact.ndcg_at_10:.3f}",
+                f"{s.wins} / {s.losses}",
+                f"{s.sign_test_p:.3f}",
+            ]
         )
-    rows += [
-        "",
-        "By company group (tuning hit@5; wins and losses against the baseline):",
-        "",
-        "| Model | Group | Companies | n | Baseline | Fine-tuned | Wins / losses | p |",
-        "|" + " --- |" * 8,
+    groups = [
+        [
+            r.spec.key,
+            g.name,
+            ", ".join(g.companies),
+            g.num_queries,
+            g.baseline_hits_at_5,
+            g.model_hits_at_5,
+            f"{g.wins} / {g.losses}",
+            f"{g.sign_test_p:.3f}",
+        ]
+        for r in results
+        for g in r.subsets
     ]
-    for r in results:
-        for g in r.subsets:
-            rows.append(
-                f"| {r.spec.key} | {g.name} | {', '.join(g.companies)} | {g.num_queries} "
-                f"| {g.baseline_hits_at_5} | {g.model_hits_at_5} | {g.wins} / {g.losses} "
-                f"| {g.sign_test_p:.3f} |"
-            )
-    rows += ["", noise_note(n)]
-    return "\n".join(rows) + "\n"
+    first = markdown_table(
+        [
+            "Model",
+            "Trained on",
+            f"Tuning hit@{SELECTION_K}",
+            "Wins / losses",
+            "p",
+            "MRR",
+            "SciFact nDCG@10",
+            "SciFact wins / losses",
+            "p",
+        ],
+        overall,
+    )
+    second = markdown_table(
+        ["Model", "Group", "Companies", "n", "Baseline", "Fine-tuned", "Wins / losses", "p"],
+        groups,
+        [noise_note(n)],
+    )
+    note = "By company group (tuning hit@5; wins and losses against the baseline):"
+    return f"{first}\n{note}\n\n{second}"

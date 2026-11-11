@@ -24,6 +24,7 @@ import random
 import re
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
+from typing import Literal
 
 import numpy as np
 from fine_print.models import Chunk
@@ -50,7 +51,9 @@ NEGATIVE_DEPTH = 30
 FALSE_NEGATIVE_RATIO = 0.95
 VALIDATION_SHARE = 0.1
 SPLIT_SEED = 20261111
-SELF_REFERENCE = re.compile(r"\b(this|the|above) (passage|section|text|clause|paragraph)\b", re.I)
+SELF_REFERENCE = re.compile(
+    r"\b(this|the|above) (passage|section|text|clause|paragraph)\b", re.IGNORECASE
+)
 STOPWORDS = frozenset(
     (
         "a",
@@ -94,6 +97,9 @@ STOPWORDS = frozenset(
 )
 
 
+type Split = Literal["train", "validation"]
+
+
 class TrainingExample(FrozenModel):
     """A question, the chunk it came from, and a hard negative, as the model will see them."""
 
@@ -104,7 +110,7 @@ class TrainingExample(FrozenModel):
     negative_chunk_id: str | None
     company: str
     doc_type: str
-    split: str
+    split: Split
 
 
 class LeakageCount(FrozenModel):

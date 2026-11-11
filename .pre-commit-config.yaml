@@ -4,14 +4,23 @@ repos:
     hooks:
       - id: end-of-file-fixer
       - id: trailing-whitespace
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.3
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
+      - id: check-toml
+      - id: check-yaml
+      - id: check-added-large-files
+  # Ruff and ty run from the project's environment, so their versions follow uv.lock and can't
+  # drift from what CI runs.
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
       - id: ty
         name: ty check
         entry: uv run ty check

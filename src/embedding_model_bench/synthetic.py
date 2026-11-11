@@ -19,6 +19,7 @@ import httpx
 from fine_print.models import Chunk
 from pydantic import BaseModel, ValidationError
 
+from embedding_model_bench.files import read_jsonl
 from embedding_model_bench.models import FrozenModel
 
 PROMPT_VERSION = 1
@@ -199,10 +200,7 @@ def repair_tail(path: Path) -> bool:
 
 def load_records(path: Path) -> list[SyntheticRecord]:
     """Read the records written so far."""
-    if not path.exists():
-        return []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [SyntheticRecord.model_validate_json(line) for line in lines if line.strip()]
+    return read_jsonl(path, SyntheticRecord) if path.exists() else []
 
 
 def _append(path: Path, record: SyntheticRecord) -> None:

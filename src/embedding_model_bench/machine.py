@@ -1,5 +1,6 @@
 """What the machine is doing: memory, competing apps, and who holds the heavy-step lock."""
 
+import fcntl
 import os
 import resource
 import sys
@@ -49,27 +50,51 @@ def mps_allocated_mb() -> float:
     return torch.mps.driver_allocated_memory() / MIB if torch.backends.mps.is_available() else 0.0
 
 
+def _try_lock(fd: int) -> bool:
+    """Try to take an exclusive lock without waiting, and say whether it was taken."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
 def lock_holder(lock_path: Path) -> int | None:
-    """Return the process ID holding the lock, ignoring a lock left by a process that died."""
+    """Return the process ID holding the lock, or None if nobody holds it.
+
+    The lock is the operating system's, so a process that died, even without cleaning up,
+    doesn't hold it. A recorded ID that is unreadable is reported as 0.
+    """
     if not lock_path.exists():
         return None
-    pid = int(lock_path.read_text(encoding="utf-8").strip() or 0)
-    return pid if pid and psutil.pid_exists(pid) else None
+    fd = os.open(lock_path, os.O_RDONLY)
+    try:
+        if _try_lock(fd):
+            return None
+        text = lock_path.read_text(encoding="utf-8").strip()
+        return int(text) if text.isdigit() else 0
+    finally:
+        os.close(fd)
 
 
 @contextmanager
 def heavy_step(lock_path: Path) -> Generator[None]:
     """Hold the lock that keeps Ollama generation apart from benchmarks and training.
 
+    The file stays in place; holding it is what counts, and the kernel releases it when this
+    process ends however it ends.
+
     Raises:
-        HeavyStepBusyError: If a live process already holds the lock.
+        HeavyStepBusyError: If another process holds the lock.
     """
-    holder = lock_holder(lock_path)
-    if holder is not None:
-        raise HeavyStepBusyError(f"Process {holder} is running a heavy step. Wait for it to end.")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()), encoding="utf-8")
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
+        if not _try_lock(fd):
+            holder = lock_holder(lock_path)
+            raise HeavyStepBusyError(f"Process {holder} is running a heavy step. Wait for it.")
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
         yield
     finally:
-        lock_path.unlink(missing_ok=True)
+        os.close(fd)  # Closing releases the lock.

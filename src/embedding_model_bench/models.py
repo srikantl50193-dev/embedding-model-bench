@@ -68,6 +68,14 @@ class RetrievalScores(FrozenModel):
     ndcg_at_10: float
     first_relevant_ranks: list[int | None]
 
+    def hit_flags(self, k: int) -> list[bool]:
+        """Return, for each query, whether a relevant result was in the top k."""
+        return [rank is not None and rank <= k for rank in self.first_relevant_ranks]
+
+    def hits(self, k: int) -> int:
+        """Return how many queries had a relevant result in the top k."""
+        return sum(self.hit_flags(k))
+
 
 class Timing(FrozenModel):
     """Speed on one device."""

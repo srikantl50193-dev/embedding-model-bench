@@ -3,13 +3,17 @@
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-import numpy as np
-
-from embedding_model_bench.benchmark import BenchmarkInputs, score_scifact, score_tuning
-from embedding_model_bench.compare import PairedComparison, noise_note, paired_comparison
-from embedding_model_bench.embedding import Encoder, EncoderFactory, embed_cached
+from embedding_model_bench.benchmark import BenchmarkInputs, encode_inputs, score_encoded
+from embedding_model_bench.compare import (
+    SELECTION_K,
+    PairedComparison,
+    noise_note,
+    paired_comparison,
+)
+from embedding_model_bench.embedding import EncoderFactory, cached_embedder
 from embedding_model_bench.machine import peak_rss_mb
 from embedding_model_bench.models import FrozenModel, ModelSpec, RetrievalScores
+from embedding_model_bench.report import markdown_table
 
 CARD = "as on the card"
 NONE = "no prefixes"
@@ -81,39 +85,12 @@ def run_prefix_ablation(
     combinations = variants_for(spec)
     if not combinations:
         raise ValueError(f"{spec.key} has no prefixes to test")
-    loaded: list[Encoder] = []
-
-    def encoder() -> Encoder:
-        if not loaded:
-            loaded.append(encoder_factory(spec, device))
-        return loaded[0]
-
-    def embed(texts: Sequence[str], prefix: str) -> np.ndarray:
-        return embed_cached(spec, texts, prefix, cache_dir, encoder)[0]
-
-    chunk_texts = [chunk.embedding_text() for chunk in inputs.chunks]
-    query_texts = [question.question for question in inputs.questions]
-    document_ids, query_ids = list(inputs.scifact.corpus), list(inputs.scifact.queries)
-    document_texts = list(inputs.scifact.corpus.values())
-    scifact_query_texts = list(inputs.scifact.queries.values())
-
+    embed = cached_embedder(spec, cache_dir, lambda: encoder_factory(spec, device))
     scored = []
     for name, query_prefix, passage_prefix in combinations:
         log(f"{name}: query {query_prefix!r}, passage {passage_prefix!r}")
-        tuning = score_tuning(
-            embed(query_texts, query_prefix),
-            embed(chunk_texts, passage_prefix),
-            inputs.chunks,
-            inputs.questions,
-        )
-        scifact = score_scifact(
-            embed(scifact_query_texts, query_prefix),
-            embed(document_texts, passage_prefix),
-            query_ids,
-            document_ids,
-            inputs.scifact,
-        )
-        scored.append((name, query_prefix, passage_prefix, tuning, scifact))
+        encoded = encode_inputs(inputs, embed, query_prefix, passage_prefix)
+        scored.append((name, query_prefix, passage_prefix, *score_encoded(inputs, encoded)))
 
     card_tuning, card_scifact = scored[0][3], scored[0][4]
     return PrefixResult(
@@ -141,7 +118,7 @@ def prefix_table(results: Sequence[PrefixResult]) -> str:
     headers = [
         "Model",
         "Prefixes",
-        "Tuning hit@5",
+        f"Tuning hit@{SELECTION_K}",
         "Wins / losses",
         "p",
         "MRR",
@@ -149,22 +126,20 @@ def prefix_table(results: Sequence[PrefixResult]) -> str:
         "SciFact wins / losses",
         "p",
     ]
-    rows = ["| " + " | ".join(headers) + " |", "|" + " --- |" * len(headers)]
-    for result in results:
-        for v in result.variants:
-            tuning, scifact = v.tuning_vs_card, v.scifact_vs_card
-            cells = [
-                result.spec.key,
-                v.name,
-                f"{v.tuning.hit_at_k[5]:.3f}",
-                f"{tuning.wins} / {tuning.losses}",
-                f"{tuning.sign_test_p:.3f}",
-                f"{v.tuning.mrr:.3f}",
-                f"{v.scifact.ndcg_at_10:.3f}",
-                f"{scifact.wins} / {scifact.losses}",
-                f"{scifact.sign_test_p:.3f}",
-            ]
-            rows.append("| " + " | ".join(cells) + " |")
-    if results:
-        rows += ["", noise_note(results[0].variants[0].tuning.num_queries)]
-    return "\n".join(rows) + "\n"
+    rows = [
+        [
+            result.spec.key,
+            v.name,
+            f"{v.tuning.hit_at_k[SELECTION_K]:.3f}",
+            f"{v.tuning_vs_card.wins} / {v.tuning_vs_card.losses}",
+            f"{v.tuning_vs_card.sign_test_p:.3f}",
+            f"{v.tuning.mrr:.3f}",
+            f"{v.scifact.ndcg_at_10:.3f}",
+            f"{v.scifact_vs_card.wins} / {v.scifact_vs_card.losses}",
+            f"{v.scifact_vs_card.sign_test_p:.3f}",
+        ]
+        for result in results
+        for v in result.variants
+    ]
+    footer = [noise_note(results[0].variants[0].tuning.num_queries)] if results else []
+    return markdown_table(headers, rows, footer)

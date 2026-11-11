@@ -6,8 +6,8 @@ experiment can turn them on and off and the cache key sees exactly what was enco
 
 import hashlib
 import json
-import os
 from collections.abc import Callable, Sequence
+from functools import cache
 from pathlib import Path
 from typing import Protocol
 
@@ -36,6 +36,9 @@ class Encoder(Protocol):
 
 
 type EncoderFactory = Callable[[ModelSpec, str], Encoder]
+# Embeds texts with a prefix: the shape every experiment uses, cached or not.
+type Embed = Callable[[Sequence[str], str], np.ndarray]
+WEIGHT_PATTERNS = ("*.safetensors", "*.bin")
 
 
 class SentenceTransformerEncoder:
@@ -81,13 +84,27 @@ class SentenceTransformerEncoder:
         return sum(parameter.numel() for parameter in self._model.parameters())
 
     def weights_bytes(self) -> int:
-        """Return the size of the cached weights file, or 0 if it can't be found."""
-        from huggingface_hub import try_to_load_from_cache  # noqa: PLC0415
+        """Return the size of the weights on disk, summed over every weights file.
 
-        path = try_to_load_from_cache(
-            self._spec.repo, "model.safetensors", revision=self._spec.revision
-        )
-        return Path(path).stat().st_size if isinstance(path, str) else 0
+        Raises:
+            FileNotFoundError: If no weights file is found. A size of 0 would win the selection
+                rule's tie-break on size, so it must never be reported.
+        """
+        from huggingface_hub import snapshot_download  # noqa: PLC0415
+
+        folder = Path(self._spec.repo)
+        if not folder.is_dir():
+            folder = Path(
+                snapshot_download(
+                    self._spec.repo, revision=self._spec.revision, local_files_only=True
+                )
+            )
+        for pattern in WEIGHT_PATTERNS:
+            # Prefer safetensors: repos often ship the same weights in both formats.
+            files = list(folder.glob(pattern))
+            if files:
+                return sum(path.stat().st_size for path in files)
+        raise FileNotFoundError(f"No weights file found for {self._spec.key} in {folder}")
 
 
 def cache_key(spec: ModelSpec, prefix: str, texts: Sequence[str]) -> str:
@@ -136,5 +153,30 @@ def embed_cached(
     # Written then renamed, so that an interrupted run can't leave a partial file in the cache.
     partial = path.with_suffix(".partial.npy")
     np.save(partial, vectors)
-    os.replace(partial, path)
+    partial.replace(path)
     return vectors, False
+
+
+def cached_embedder(
+    spec: ModelSpec,
+    cache_dir: Path,
+    load: Callable[[], Encoder],
+    log: Callable[[str], None] | None = None,
+) -> Embed:
+    """Return a function that embeds through the cache, loading the model at most once.
+
+    Args:
+        spec: The model.
+        cache_dir: Where vectors are cached.
+        load: Loads the model. Called only on the first cache miss.
+        log: If given, told whether each request was cached.
+    """
+    encoder = cache(load)
+
+    def embed(texts: Sequence[str], prefix: str) -> np.ndarray:
+        vectors, hit = embed_cached(spec, texts, prefix, cache_dir, encoder)
+        if log:
+            log(f"{len(texts)} texts, prefix {prefix!r}: {'from cache' if hit else 'computed'}")
+        return vectors
+
+    return embed

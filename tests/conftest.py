@@ -1,6 +1,14 @@
+"""Shared fixtures. Loaded by pytest before any test module."""
+
+import sys
 from pathlib import Path
 
 import pytest
+
+# Must run before anything imports fine_print. Test modules import `conftest_fakes`, which
+# imports fine_print, before they import this package (whose __init__ sets the same flag), so
+# without this the tests could write .pyc files into ../fine-print, which must stay read-only.
+sys.dont_write_bytecode = True
 
 POLICY = """# Refunds
 
