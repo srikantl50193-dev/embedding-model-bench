@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization
 
 setup:
 	bash scripts/setup.sh
@@ -39,3 +39,6 @@ prefixes:
 
 matryoshka:
 	uv run emb-bench matryoshka
+
+quantization:
+	uv run emb-bench quantization

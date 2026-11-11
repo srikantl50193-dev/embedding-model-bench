@@ -56,7 +56,13 @@ def score_tuning(
     questions: Sequence[EvalQuestion],
 ) -> RetrievalScores:
     """Score Fine Print's questions using its keyword test for relevance."""
-    relevant = [
+    relevant = tuning_relevant(chunks, questions)
+    return score(top_k(query_vectors, chunk_vectors, DEEPEST).tolist(), relevant)
+
+
+def tuning_relevant(chunks: Sequence[Chunk], questions: Sequence[EvalQuestion]) -> list[set[int]]:
+    """Return, for each question, the indexes of the chunks that pass Fine Print's keyword test."""
+    return [
         {
             index
             for index, chunk in enumerate(chunks)
@@ -64,7 +70,6 @@ def score_tuning(
         }
         for question in questions
     ]
-    return score(top_k(query_vectors, chunk_vectors, DEEPEST).tolist(), relevant)
 
 
 def score_scifact(
@@ -78,6 +83,12 @@ def score_scifact(
     position = {doc_id: index for index, doc_id in enumerate(document_ids)}
     relevant = [{position[doc] for doc in scifact.qrels[query]} for query in query_ids]
     return score(top_k(query_vectors, document_vectors, DEEPEST).tolist(), relevant)
+
+
+def scifact_relevant(scifact: SciFact) -> list[set[int]]:
+    """Return, for each query in order, the positions of its relevant documents in the corpus."""
+    position = {doc_id: index for index, doc_id in enumerate(scifact.corpus)}
+    return [{position[doc] for doc in scifact.qrels[query]} for query in scifact.queries]
 
 
 def measure_timing(

@@ -13,7 +13,7 @@ from embedding_model_bench.preflight import HeavyStep, run_preflight
 
 if TYPE_CHECKING:
     from embedding_model_bench.benchmark import BenchmarkInputs
-    from embedding_model_bench.models import BenchmarkResult
+    from embedding_model_bench.models import BenchmarkResult, MachineState
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -336,6 +336,56 @@ def matryoshka() -> None:
     (out_dir / "summary.md").write_text(table, encoding="utf-8")
     typer.echo(table)
     typer.echo(f"Peak RSS: {max(r.peak_rss_mb for r in results):.0f} MB")
+
+
+@app.command()
+def quantization() -> None:
+    """Measure float32, int8 and binary vectors: quality, memory and search time."""
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.quantization import (  # noqa: PLC0415
+        CONFIGS,
+        quantization_table,
+        run_quantization,
+    )
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    out_dir = settings.results_dir / "quantization"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    with heavy_step(settings.results_dir / ".heavy.lock"):
+        for config in CONFIGS:
+            spec = MODELS[config.key]
+            name = f"{config.key}-{config.dim}"
+            result = run_quantization(
+                spec,
+                config.dim,
+                inputs,
+                settings.data_dir / "embeddings",
+                lambda spec=spec: SentenceTransformerEncoder(spec, _devices()[0]),
+                log=lambda message, name=name: typer.echo(f"[{name}] {message}", err=True),
+            )
+            (out_dir / f"{name}.json").write_text(
+                result.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            results.append(result)
+    table = quantization_table(results)
+    (out_dir / "summary.md").write_text(table, encoding="utf-8")
+    typer.echo(table)
+    typer.echo(f"Peak RSS: {max(r.peak_rss_mb for r in results):.0f} MB")
+    for result in results:
+        _report_provisional_machine(result.spec.key, result.machine)
+
+
+def _report_provisional_machine(key: str, machine: MachineState) -> None:
+    """Say so if competing apps or low memory mean timings can't be final."""
+    if machine.timings_provisional:
+        typer.echo(
+            f"[{key}] Timings are PROVISIONAL: competing apps: "
+            f"{', '.join(machine.competing_apps) or 'none'}, {machine.available_gb} GB available."
+        )
 
 
 def _devices() -> list[str]:

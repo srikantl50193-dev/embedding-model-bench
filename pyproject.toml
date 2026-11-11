@@ -5,6 +5,7 @@ description = "Which embedding model should a client use for their documents, an
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "faiss-cpu>=1.15.1,<1.16",
     "fine-print",
     "httpx>=0.28.1",
     "huggingface-hub>=2.4.0",

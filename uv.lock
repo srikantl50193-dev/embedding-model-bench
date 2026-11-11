@@ -492,6 +492,7 @@ name = "embedding-model-bench"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "faiss-cpu" },
     { name = "fine-print" },
     { name = "httpx" },
     { name = "huggingface-hub" },
@@ -517,6 +518,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "faiss-cpu", specifier = ">=1.15.1,<1.16" },
     { name = "fine-print", editable = "../fine-print" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "huggingface-hub", specifier = ">=2.4.0" },

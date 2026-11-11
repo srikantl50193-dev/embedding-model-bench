@@ -2,7 +2,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
 from conftest_fakes import INPUTS, SPEC, FakeEncoder
 from embedding_model_bench.embedding import Encoder
@@ -41,15 +40,26 @@ def test_an_impossible_length_is_rejected(dim: int) -> None:
         truncate(np.ones((1, 3), dtype=np.float32), dim)
 
 
+def layer_norm(x: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+    """torch's `layer_norm` without weights: (x - mean) / sqrt(var + eps), per row.
+
+    Written out here because tests can't load torch alongside FAISS on macOS.
+    """
+    mean = x.mean(axis=1, keepdims=True)
+    return (x - mean) / np.sqrt(x.var(axis=1, keepdims=True) + eps)
+
+
+def normalize(x: np.ndarray) -> np.ndarray:
+    return x / np.linalg.norm(x, axis=1, keepdims=True)
+
+
 def test_layer_norm_matches_nomics_recipe_from_normalized_vectors() -> None:
-    raw = torch.randn(5, 768, generator=torch.Generator().manual_seed(0)) * 7 + 2
+    raw = np.random.default_rng(0).standard_normal((5, 768)) * 7 + 2
     # The recipe on Nomic's card, run on the raw pooled output.
-    recipe = torch.nn.functional.layer_norm(raw, normalized_shape=(768,))[:, :256]
-    recipe = torch.nn.functional.normalize(recipe, p=2, dim=1).numpy()
+    recipe = normalize(layer_norm(raw)[:, :256])
 
     # This project's route, starting from the normalized vectors in the cache.
-    cached = torch.nn.functional.normalize(raw, p=2, dim=1).numpy()
-    np.testing.assert_allclose(truncate(cached, 256, layer_norm=True), recipe, atol=1e-5)
+    np.testing.assert_allclose(truncate(normalize(raw), 256, layer_norm=True), recipe, atol=1e-5)
 
 
 def test_only_nomic_uses_layer_norm_and_every_model_is_known() -> None:

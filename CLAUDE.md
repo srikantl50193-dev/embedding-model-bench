@@ -58,7 +58,8 @@ This machine has 16 GB of RAM, and `gemma4:e4b` needs 6-7 GB.
 
 ```bash
 make setup        # create or repair .venv from uv.lock, and install the git hooks
-make check        # lint, typecheck and test, as CI does
+make check        # lint (ruff), typecheck (ty) and test (pytest with coverage), as CI does
+make format       # ruff fix and format
 make env          # hardware, MPS, Ollama, and what's in the shared cache
 make data         # symlink Fine Print's data, write the manifest, fetch SciFact
 make data-verify  # check Fine Print hasn't changed
@@ -69,7 +70,19 @@ make matryoshka   # score shorter vectors against storage, from cached vectors
 uv run pytest tests/test_x.py::test_y   # a single test
 ```
 
-Tests use no network, models, Ollama or real data, only tiny fakes. They do need `../fine-print`, because the chunker is imported from it. CI clones Fine Print at a pinned commit and installs CPU-only torch on Linux.
+Tests use no network, models, Ollama or real data, only tiny fakes. They do need `../fine-print`, because the chunker is imported from it. CI clones Fine Print at a pinned commit and installs CPU-only torch on Linux. Fakes such as `FakeEncoder` and `make_chunk` are in `tests/conftest_fakes.py`, and `tests/conftest.py` builds a tiny fake Fine Print tree.
+
+## Architecture
+
+- **`cli.py`** is the entry point (`emb-bench`, built with Typer). It imports torch and sentence-transformers inside each command, so `--help` and `preflight` start fast. Keep heavy imports out of module scope there.
+- **One process per model.** `benchmark` and `prefixes` run the hidden `benchmark-one` and `prefixes-one` commands as subprocesses, so each model's peak RAM is measured alone and its memory is freed afterwards. Each writes `results/<step>/<model>.json`, then the parent writes `summary.md`.
+- **Heavy-step lock.** Model work runs inside `machine.heavy_step(results/.heavy.lock)`, which refuses to start while another live process holds the lock. Synthetic generation and training must use the same lock.
+- **Vector cache** (`embedding.embed_cached`, in `data/embeddings/`). The key hashes the repo, revision, prefix and exact text. That is why reruns only re-measure timings, and why `matryoshka` needs no model. Prefixes are added in `embed_cached`, not through sentence-transformers' `prompts`, so the key covers them. Files are written to a temporary name and then renamed.
+- **Models** are pinned to exact revisions in `registry.py` (`MODELS`). Add a model there, not in the CLI.
+- **Scoring:** `metrics.py` does exact search, Fine Print's keyword recall@k and BEIR metrics. `compare.py` does paired per-question comparisons and `noise_note`, the "within N questions" wording. Use these for any new experiment, not ad hoc comparisons.
+- **Data:** `corpus.py` chunks with Fine Print's own code and fingerprints the result. `data.py` creates the symlinks and writes and checks `data/manifest.json`. `scifact.py` reads pinned SciFact revisions from the HF cache.
+- **Settings** are in `config.py` and can be overridden with `EMB_BENCH_*` or `.env`. The fresh held-out file's SHA-256 is pinned there.
+- **Experiment modules** (`benchmark.py`, `prefixes.py`, `matryoshka.py`) take an `EncoderFactory` or `Callable[[], Encoder]` and load the model only on a cache miss, so tests can pass a fake encoder.
 
 ## Status
 
