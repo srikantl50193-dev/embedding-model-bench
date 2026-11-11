@@ -1,6 +1,8 @@
 """Turn synthetic questions into training examples: filter, check for leakage, mine negatives.
 
-Every threshold here was fixed before any synthetic question was generated.
+The thresholds were fixed before any synthetic question was generated, then revised once after
+reading samples of the first pass, before any training or scoring (`REVISIONS`). Only training
+data and tuning-set pairs were read; held-out questions were compared, never read.
 
 1. Format: a question must end in "?", have 4 to 30 words, name the company and not refer to
    "the passage" or "this section", which a real user couldn't see.
@@ -30,10 +32,20 @@ from embedding_model_bench.models import FrozenModel
 from embedding_model_bench.synthetic import COMPANY_NAMES, SyntheticRecord, text_sha256
 
 MIN_WORDS, MAX_WORDS = 4, 30
-LEAK_COSINE = 0.85
+LEAK_COSINE = 0.80
 LEAK_JACCARD = 0.5
-REPORTED_COSINES = (0.80, 0.85, 0.90)
-ROUNDTRIP_K = 20
+REPORTED_COSINES = (0.75, 0.80, 0.85, 0.90)
+ROUNDTRIP_K = 100
+REVISIONS = {
+    "leak_cosine": (
+        "0.85 -> 0.80: near-copies of tuning questions sat just under 0.85, such as 0.848 for "
+        "two questions about whether Discord sells data. Stricter can only remove training data."
+    ),
+    "roundtrip_k": (
+        "20 -> 100: most sampled drops were good questions that the baseline itself ranked "
+        "poorly, which are the cases fine-tuning should learn from."
+    ),
+}
 NEGATIVE_DEPTH = 30
 FALSE_NEGATIVE_RATIO = 0.95
 VALIDATION_SHARE = 0.1
@@ -119,6 +131,7 @@ class TrainingDataReport(FrozenModel):
     num_validation: int
     num_without_negative: int
     thresholds: dict[str, float]
+    revisions: dict[str, str]
 
 
 def company_name(company: str) -> str:
@@ -248,7 +261,7 @@ def prepare_training_data(
         if leak:
             continue
         scores = scores_all[row]
-        ranked = np.argsort(-scores, kind="stable")[:NEGATIVE_DEPTH]
+        ranked = np.argsort(-scores, kind="stable")[: max(ROUNDTRIP_K, NEGATIVE_DEPTH)]
         source = chunks[position[record.chunk_id]]
         positives = set(copies[record.text_sha256])
         if not positives & set(ranked[:ROUNDTRIP_K].tolist()):
@@ -258,7 +271,7 @@ def prepare_training_data(
         negative = next(
             (
                 chunks[int(i)]
-                for i in ranked[1:]
+                for i in ranked[1:NEGATIVE_DEPTH]
                 if int(i) not in positives
                 and not overlaps(chunks[int(i)], source)
                 and scores[i] < ceiling
@@ -296,6 +309,7 @@ def prepare_training_data(
             "false_negative_ratio": FALSE_NEGATIVE_RATIO,
             "validation_share": VALIDATION_SHARE,
         },
+        revisions=REVISIONS,
     )
     return examples, report
 

@@ -1,0 +1,89 @@
+{
+  "num_records": 1520,
+  "num_questions": 3036,
+  "dropped_format": {},
+  "leakage": [
+    {
+      "eval_set": "tuning",
+      "num_eval_questions": 31,
+      "exact": 0,
+      "cosine_at": {
+        "0.75": 817,
+        "0.80": 226,
+        "0.85": 61,
+        "0.90": 10
+      },
+      "jaccard": 7,
+      "dropped": 226
+    },
+    {
+      "eval_set": "tuning out of scope",
+      "num_eval_questions": 15,
+      "exact": 0,
+      "cosine_at": {
+        "0.75": 2,
+        "0.80": 0,
+        "0.85": 0,
+        "0.90": 0
+      },
+      "jaccard": 0,
+      "dropped": 0
+    },
+    {
+      "eval_set": "Fine Print held-out (spent)",
+      "num_eval_questions": 20,
+      "exact": 0,
+      "cosine_at": {
+        "0.75": 364,
+        "0.80": 71,
+        "0.85": 27,
+        "0.90": 4
+      },
+      "jaccard": 2,
+      "dropped": 71
+    },
+    {
+      "eval_set": "Fine Print held-out out of scope",
+      "num_eval_questions": 10,
+      "exact": 0,
+      "cosine_at": {
+        "0.75": 7,
+        "0.80": 2,
+        "0.85": 0,
+        "0.90": 0
+      },
+      "jaccard": 0,
+      "dropped": 2
+    },
+    {
+      "eval_set": "fresh held-out",
+      "num_eval_questions": 30,
+      "exact": 0,
+      "cosine_at": {
+        "0.75": 710,
+        "0.80": 173,
+        "0.85": 38,
+        "0.90": 7
+      },
+      "jaccard": 3,
+      "dropped": 174
+    }
+  ],
+  "dropped_leakage": 427,
+  "dropped_roundtrip": 236,
+  "num_train": 2124,
+  "num_validation": 249,
+  "num_without_negative": 724,
+  "thresholds": {
+    "leak_cosine": 0.8,
+    "leak_jaccard": 0.5,
+    "roundtrip_k": 100.0,
+    "negative_depth": 30.0,
+    "false_negative_ratio": 0.95,
+    "validation_share": 0.1
+  },
+  "revisions": {
+    "leak_cosine": "0.85 -> 0.80: near-copies of tuning questions sat just under 0.85, such as 0.848 for two questions about whether Discord sells data. Stricter can only remove training data.",
+    "roundtrip_k": "20 -> 100: most sampled drops were good questions that the baseline itself ranked poorly, which are the cases fine-tuning should learn from."
+  }
+}

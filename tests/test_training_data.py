@@ -118,3 +118,18 @@ def test_each_source_chunk_is_in_exactly_one_split() -> None:
     assert all(len(s) == 1 for s in splits.values())
     assert report.num_train + report.num_validation == len(examples)
     assert report.num_validation >= 1
+
+
+def test_the_round_trip_cut_off_isnt_limited_by_the_negative_depth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    question = "Does Acme provide refunds?"
+    order = np.argsort(-(embed([question]) @ CHUNK_VECTORS.T)[0], kind="stable")
+    source = int(order[2])  # third: inside a round-trip cut-off of 5, deeper than negatives go
+    monkeypatch.setattr(training_data, "ROUNDTRIP_K", 5)
+    monkeypatch.setattr(training_data, "NEGATIVE_DEPTH", 2)
+    examples, report = prepare_training_data(
+        [record(source, question)], CHUNKS, CHUNK_VECTORS, embed, {}
+    )
+    assert report.dropped_roundtrip == 0
+    assert len(examples) == 1
