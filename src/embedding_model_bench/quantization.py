@@ -44,6 +44,8 @@ from embedding_model_bench.report import markdown_table
 RESCORE_MULTIPLIER = 4
 # Extra results fetched so that exact ties at the cut-off can be ordered by index.
 TIE_MARGIN = 10
+# Vectors added to an index at a time, so a large corpus never needs a second full copy.
+ADD_BATCH = 50_000
 LATENCY_CORPUS = 100_000
 LATENCY_QUERIES = 300
 WARMUP = 10
@@ -141,29 +143,51 @@ def unpack_signs(packed: np.ndarray, dim: int) -> np.ndarray:
 class SearchIndex:
     """A FAISS index for one scheme, holding a corpus and answering top-k queries."""
 
-    def __init__(self, scheme: Scheme, documents: np.ndarray) -> None:
+    def __init__(
+        self, scheme: Scheme, documents: np.ndarray, train_sample: np.ndarray | None = None
+    ) -> None:
+        """Build the index.
+
+        Args:
+            scheme: How vectors are stored and searched.
+            documents: The corpus, float32. May be a memory-mapped file: it is read in batches,
+                and rescoring with float32 vectors reads it in place, as a deployment keeping
+                float32 vectors on disk would.
+            train_sample: What int8's per-dimension ranges are learned from. Defaults to the
+                whole corpus.
+        """
         faiss = load_faiss()
         self.scheme = scheme
-        self.dim = documents.shape[1]
-        self._count = documents.shape[0]
-        vectors = np.ascontiguousarray(documents, dtype=np.float32)
+        self._count, self.dim = documents.shape
         # Only rescoring with float32 vectors needs them kept beside the index. Keeping them for
-        # every scheme would inflate the peak memory recorded with the results.
-        self._documents = vectors if scheme == Scheme.BINARY_RESCORE_FLOAT else None
+        # every scheme would inflate the memory recorded with the results.
+        self._documents = documents if scheme == Scheme.BINARY_RESCORE_FLOAT else None
         self._index: Any
         if scheme == Scheme.FLOAT32:
             self._index = faiss.IndexFlatIP(self.dim)
-            self._index.add(vectors)
         elif scheme == Scheme.INT8:
             self._index = faiss.IndexScalarQuantizer(
                 self.dim, faiss.ScalarQuantizer.QT_8bit, faiss.METRIC_INNER_PRODUCT
             )
-            self._index.train(vectors)
-            self._index.add(vectors)
+            sample = documents if train_sample is None else train_sample
+            self._index.train(np.ascontiguousarray(sample, dtype=np.float32))
         else:
-            self._bits = binarize(vectors)
             self._index = faiss.IndexBinaryFlat(self.dim)
+        bits = []
+        for start in range(0, self._count, ADD_BATCH):
+            batch = np.ascontiguousarray(documents[start : start + ADD_BATCH], dtype=np.float32)
+            if scheme in {Scheme.FLOAT32, Scheme.INT8}:
+                self._index.add(batch)
+            else:
+                bits.append(binarize(batch))
+        if bits:
+            self._bits = np.concatenate(bits)
             self._index.add(self._bits)
+
+    @property
+    def index_bytes(self) -> int:
+        """Return the bytes FAISS holds for the stored vectors, from its own count and code size."""
+        return int(self._index.ntotal) * int(self._index.code_size)
 
     def search(self, queries: np.ndarray, k: int) -> np.ndarray:
         """Return the indexes of each query's k best documents, best first.

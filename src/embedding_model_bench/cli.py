@@ -429,6 +429,47 @@ def quantization() -> None:
         _report_provisional(f"{result.spec.key}-{result.dim}", result.machine)
 
 
+@app.command()
+def cost() -> None:
+    """Project storage, query latency and embedding time to 100k and 1M chunks. Timing-sensitive."""
+    from embedding_model_bench.cost import CONFIGS, cost_table, run_cost  # noqa: PLC0415
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.files import read_json, write_json  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.models import BenchmarkResult  # noqa: PLC0415
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    out_dir = settings.results_dir / "cost"
+    results = []
+    with heavy_step(_lock_path(settings)):
+        for config in CONFIGS:
+            spec = MODELS[config.key]
+            benchmark = read_json(
+                settings.results_dir / "models" / f"{spec.key}.json", BenchmarkResult
+            )
+            result = run_cost(
+                config,
+                spec,
+                benchmark,
+                inputs,
+                settings.data_dir / "embeddings",
+                settings.data_dir / "cost_scratch",
+                lambda spec=spec: SentenceTransformerEncoder(spec, _devices()[0]),
+                log=_logger("cost"),
+            )
+            slug = f"{config.key}-{config.dim}-{config.scheme.name.lower()}"
+            write_json(out_dir / f"{slug}.json", result)
+            results.append(result)
+    table = cost_table(results)
+    (out_dir / "summary.md").write_text(table, encoding="utf-8")
+    typer.echo(table)
+    typer.echo(f"Peak RSS: {max(r.peak_rss_mb for r in results):.0f} MB")
+    for result in results:
+        _report_provisional(result.config.name, result.machine)
+
+
 # Synthetic data and fine-tuning.
 
 

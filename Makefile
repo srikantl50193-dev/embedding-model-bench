@@ -1,7 +1,7 @@
 # Fine Print is read-only for this project, bytecode caches included.
 export PYTHONDONTWRITEBYTECODE := 1
 
-.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample prepare-training finetune
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample prepare-training finetune cost
 
 setup:
 	bash scripts/setup.sh
@@ -59,3 +59,7 @@ prepare-training:
 
 finetune:
 	uv run emb-bench finetune
+
+# Timing-sensitive: close Chrome and Teams first.
+cost:
+	uv run emb-bench cost
