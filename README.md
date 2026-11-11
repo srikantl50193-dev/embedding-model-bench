@@ -138,6 +138,26 @@ All figures are for exact search on one thread. Query and embedding times are pr
 
 Up to 100,000 chunks, any of these is fast enough. Past that, binary + rerank is what keeps search quick and memory small. Details are in [`results/cost/`](results/cost/summary.md).
 
+## Plugged into Fine Print
+
+The whole Fine Print pipeline was run with each model on its tuning set: retrieval, the refusal threshold, and `gemma4:e4b` answering with citations. This was on the unmerged branch `experiment/embedding-models`, in a separate worktree. Fine Print's held-out set is spent and wasn't used. The full table, with answer latency, is in that branch's `docs/embedding_experiment_results.md`.
+
+| Embedding model | min_similarity | Retrieval recall@5 | Correct citation (n=31) | Wins / losses vs bge-small | Out-of-scope refused (n=15) | Answerable wrongly refused |
+| --- | --- | --- | --- | --- | --- | --- |
+| bge-small (current) | 0.6 | 20 | 20 | - | 15 (8 by threshold, 7 by Gemma) | 1 (by Gemma) |
+| bge-base | 0.6 | 23 | 22 | 2 / 0 (p 0.50) | 15 (9 / 6) | 1 (by Gemma) |
+| bge-small, fine-tuned | 0.6 | 22 | 16 | 0 / 4 (p 0.12) | 15 (15 / 0) | 5 (4 by threshold, 1 by Gemma) |
+| bge-small | 0.738, re-tuned* | 20 | 19 | - | 15 (15 / 0) | 3 (2 by threshold, 1 by Gemma) |
+| bge-base | 0.655, re-tuned* | 23 | 20 | 1 / 0 (p 1.00) | 15 (15 / 0) | 2 (1 by threshold, 1 by Gemma) |
+| bge-small, fine-tuned | 0.571, re-tuned* | 22 | 19 | 2 / 2 (p 1.00) | 15 (15 / 0) | 3 (2 by threshold, 1 by Gemma) |
+
+\* **Re-tuned thresholds were chosen on these same questions and scored on them, so they are optimistic.** The rule, fixed before any similarity was seen, picks the threshold that sorts the most tuning questions correctly by similarity alone.
+
+- **The baseline reproduces Fine Print's published figure:** 20/31 correct citations, or 65%. Each model's retrieval recall@5 matches what this project measured, using Fine Print's own Chroma index.
+- **`bge-base` at 0.6 gains 2 correct citations**, which is noise on 31 questions. That's consistent with keeping `bge-small`.
+- **Fine-tuning shifted the model's similarity scores.** At 0.6, the threshold turned away 4 answerable questions, leaving 16/31 correct citations. A fine-tuned model needs its threshold recalibrated before it can be compared fairly; re-tuned, it reached 19/31.
+- **Raising the threshold didn't help.** At 0.6, Gemma already declines every out-of-scope question that gets past the threshold. Re-tuning on similarity alone pushed `bge-small` to 0.738, very close to the highest out-of-scope score (0.736). That added two wrong refusals and caught nothing new. So Fine Print should keep 0.6 for `bge-small`, and any future re-tuning should count the model's own refusals.
+
 ## How it was evaluated
 
 - **Choosing used the tuning set only.** That's Fine Print's 31 questions, plus SciFact as an out-of-domain check. The held-out sets were run once, at the end, for the five final configurations, and are reported as they came out.
@@ -164,6 +184,7 @@ Up to 100,000 chunks, any of these is fast enough. Past that, binary + rerank is
 3. **Then re-test fine-tuning** on that set, with training questions written in a different way from the eval questions.
 4. **Adopt binary + rerank** once the corpus passes about 100,000 chunks, and test it alongside an approximate index (HNSW) in the vector store the client will use.
 5. **Remove duplicate chunks** when Fine Print ingests documents.
+6. **Recalibrate `min_similarity` with the model in the loop** whenever the embedding model changes, counting the model's own refusals rather than similarity alone.
 
 ## Process notes
 
