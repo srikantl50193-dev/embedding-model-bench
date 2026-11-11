@@ -8,6 +8,6 @@ coverage.xml
 .env
 .DS_Store
 # Symlinks to ../fine-print, the embedding cache and fine-tuned models.
-data/
-models/
+/data/
+/models/
 results/.heavy.lock
