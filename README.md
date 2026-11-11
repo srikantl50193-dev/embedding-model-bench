@@ -213,3 +213,15 @@ uv run --group docs python scripts/make_charts.py
 - **Out-of-domain benchmark:** SciFact from [BEIR](https://github.com/beir-cellar/beir). Thakur, Reimers, Rücklé, Srivastava and Gurevych, "BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models", NeurIPS 2021 Datasets and Benchmarks Track.
 - **Models:** BAAI (bge), Snowflake (arctic-embed), Microsoft (e5), Nomic AI (nomic-embed), IBM (granite-embedding), and Google's Gemma 4 served by Ollama. Each was used at a pinned revision, listed in `registry.py`.
 - **Libraries:** sentence-transformers, FAISS and MTEB's published results.
+
+### Licences
+
+| What | Licence |
+| --- | --- |
+| bge-small-en-v1.5, bge-base-en-v1.5 (BAAI), e5-base-v2 | MIT |
+| snowflake-arctic-embed-m-v1.5, nomic-embed-text-v1.5, granite-embedding-small-english-r2 | Apache 2.0 |
+| Gemma 4 (`gemma4:e4b`), used to write the synthetic training questions | Apache 2.0 |
+| SciFact (BEIR's `BeIR/scifact` and `BeIR/scifact-qrels`) | CC BY-SA 4.0 |
+| Policy text, from ToS;DR and Open Terms Archive via Fine Print | Open Data Commons Attribution License (ODC-By) |
+
+Licences are taken from each model's and dataset's card at the pinned revision; check the card before reusing anything. This repository distributes none of the models, the policy text, SciFact, the synthetic questions or the fine-tuned weights. They are downloaded or rebuilt locally and gitignored. Short excerpts from the policies appear in `results/misses/hand_read.md`, with attribution as above.

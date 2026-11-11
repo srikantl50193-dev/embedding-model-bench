@@ -1,7 +1,12 @@
+from pathlib import Path
+
 from conftest_fakes import CHUNKS, make_chunk
+from embedding_model_bench.config import PROJECT_ROOT
+from embedding_model_bench.embedding import resolve_repo
 from embedding_model_bench.finetune import (
     choose_unseen_companies,
     data_sha256,
+    project_relative,
     select_examples,
     subset_comparison,
     training_columns,
@@ -92,3 +97,13 @@ def test_a_subset_counts_only_its_companies() -> None:
     result = subset_comparison("x", ["a"], questions, scores([1, None, 1]), scores([9, 2, None]))
     assert (result.num_queries, result.baseline_hits_at_5, result.model_hits_at_5) == (2, 1, 1)
     assert (result.wins, result.losses) == (1, 1)
+
+
+def test_saved_models_are_recorded_relative_to_the_project(tmp_path: Path) -> None:
+    assert project_relative(PROJECT_ROOT / "models" / "all") == "models/all"
+    assert project_relative(tmp_path / "elsewhere") == str(tmp_path / "elsewhere")
+
+
+def test_a_relative_model_resolves_to_its_folder_and_a_hub_id_is_unchanged() -> None:
+    assert resolve_repo("BAAI/bge-small-en-v1.5") == "BAAI/bge-small-en-v1.5"
+    assert resolve_repo("tests") == str(PROJECT_ROOT / "tests")

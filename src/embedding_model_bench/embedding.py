@@ -13,6 +13,7 @@ from typing import Protocol
 
 import numpy as np
 
+from embedding_model_bench.config import PROJECT_ROOT
 from embedding_model_bench.models import ModelSpec
 
 BATCH_SIZE = 32  # Fine Print's embedding_batch_size.
@@ -41,6 +42,16 @@ type Embed = Callable[[Sequence[str], str], np.ndarray]
 WEIGHT_PATTERNS = ("*.safetensors", "*.bin")
 
 
+def resolve_repo(repo: str) -> str:
+    """Return the folder of a model saved in this project, or a Hugging Face repo id unchanged.
+
+    Fine-tuned models are recorded relative to the project root, so that results and cache keys
+    don't contain this machine's paths.
+    """
+    local = PROJECT_ROOT / repo
+    return str(local) if local.is_dir() else repo
+
+
 class SentenceTransformerEncoder:
     """A real model, loaded from the shared Hugging Face cache."""
 
@@ -53,7 +64,7 @@ class SentenceTransformerEncoder:
 
         def load(*, local_only: bool) -> SentenceTransformer:
             return SentenceTransformer(
-                spec.repo,
+                resolve_repo(spec.repo),
                 device=device,
                 revision=spec.revision,
                 trust_remote_code=spec.trust_remote_code,
@@ -92,7 +103,7 @@ class SentenceTransformerEncoder:
         """
         from huggingface_hub import snapshot_download  # noqa: PLC0415
 
-        folder = Path(self._spec.repo)
+        folder = Path(resolve_repo(self._spec.repo))
         if not folder.is_dir():
             folder = Path(
                 snapshot_download(

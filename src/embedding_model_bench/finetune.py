@@ -36,6 +36,7 @@ from embedding_model_bench.compare import (
     noise_note,
     paired_comparison,
 )
+from embedding_model_bench.config import PROJECT_ROOT
 from embedding_model_bench.embedding import Encoder, cached_embedder
 from embedding_model_bench.files import read_jsonl
 from embedding_model_bench.models import (
@@ -87,7 +88,7 @@ class TrainingRun(FrozenModel):
     """What happened in training, and where the model is."""
 
     config: TrainConfig
-    model_dir: str
+    model_dir: str  # Relative to the project root when saved inside it, as it normally is.
     weights_sha256: str
     num_triplets: int
     num_pairs: int
@@ -173,6 +174,16 @@ def file_sha256(path: Path) -> str:
     """Hash a file without reading it into memory at once."""
     with path.open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def project_relative(path: Path) -> str:
+    """Return a path relative to the project root if it is inside it, so results stay portable."""
+    resolved = path.resolve()
+    return (
+        str(resolved.relative_to(PROJECT_ROOT))
+        if resolved.is_relative_to(PROJECT_ROOT)
+        else str(path)
+    )
 
 
 def fine_tuned_spec(run: TrainingRun) -> ModelSpec:
@@ -324,7 +335,7 @@ def train(
     shutil.rmtree(checkpoints, ignore_errors=True)
     run = TrainingRun(
         config=config,
-        model_dir=str(out_dir),
+        model_dir=project_relative(out_dir),
         weights_sha256=file_sha256(out_dir / "model.safetensors"),
         num_triplets=len(triplets["anchor"]),
         num_pairs=len(pairs["anchor"]),
