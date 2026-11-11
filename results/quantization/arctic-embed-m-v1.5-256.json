@@ -406,7 +406,7 @@
       },
       "memory_bytes_per_vector": 1024.0,
       "disk_bytes_per_vector": 1024.0,
-      "search_p50_ms": 2.039,
+      "search_p50_ms": 2.043,
       "search_p95_ms": 2.199
     },
     {
@@ -800,8 +800,8 @@
       },
       "memory_bytes_per_vector": 256.0,
       "disk_bytes_per_vector": 256.0,
-      "search_p50_ms": 4.398,
-      "search_p95_ms": 4.654
+      "search_p50_ms": 4.426,
+      "search_p95_ms": 4.545
     },
     {
       "scheme": "binary",
@@ -1588,8 +1588,8 @@
       },
       "memory_bytes_per_vector": 32.0,
       "disk_bytes_per_vector": 32.0,
-      "search_p50_ms": 0.25,
-      "search_p95_ms": 0.263
+      "search_p50_ms": 0.249,
+      "search_p95_ms": 0.26
     },
     {
       "scheme": "binary, rescored with float32 vectors",
@@ -1983,13 +1983,13 @@
       "memory_bytes_per_vector": 32.0,
       "disk_bytes_per_vector": 1056.0,
       "search_p50_ms": 0.247,
-      "search_p95_ms": 0.255
+      "search_p95_ms": 0.256
     }
   ],
-  "peak_rss_mb": 1433.0,
+  "peak_rss_mb": 1304.3,
   "machine": {
-    "available_gb": 4.74,
-    "swap_used_gb": 1.1,
+    "available_gb": 9.95,
+    "swap_used_gb": 3.66,
     "competing_apps": [],
     "timings_provisional": false
   }
