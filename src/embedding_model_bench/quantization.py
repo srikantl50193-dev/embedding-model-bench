@@ -37,6 +37,8 @@ from embedding_model_bench.models import FrozenModel, MachineState, ModelSpec, R
 from embedding_model_bench.registry import ARCTIC_M, BGE_BASE, BGE_SMALL
 
 RESCORE_MULTIPLIER = 4
+# Extra results fetched so that exact ties at the cut-off can be ordered by index.
+TIE_MARGIN = 10
 LATENCY_CORPUS = 100_000
 LATENCY_QUERIES = 300
 WARMUP = 10
@@ -155,22 +157,34 @@ class SearchIndex:
             self._index.add(self._bits)
 
     def search(self, queries: np.ndarray, k: int) -> np.ndarray:
-        """Return the indexes of each query's k best documents, best first."""
+        """Return the indexes of each query's k best documents, best first.
+
+        Exact ties go to the lower index, as in `metrics.top_k`. The corpus has identical chunks
+        in different documents, so without this, float32 here wouldn't reproduce the benchmark.
+        """
         queries = np.ascontiguousarray(queries, dtype=np.float32)
+        count = self._documents.shape[0]
         if self.scheme in (Scheme.FLOAT32, Scheme.INT8):
-            return self._index.search(queries, k)[1]
+            scores, ids = self._index.search(queries, min(k + TIE_MARGIN, count))
+            return np.stack([_best_first(i, -s, k) for s, i in zip(scores, ids, strict=True)])
         if self.scheme == Scheme.BINARY:
-            return self._index.search(binarize(queries), k)[1]
-        depth = min(k * RESCORE_MULTIPLIER, self._documents.shape[0])
+            distances, ids = self._index.search(binarize(queries), min(k + TIE_MARGIN, count))
+            return np.stack([_best_first(i, d, k) for d, i in zip(distances, ids, strict=True)])
+        depth = min(k * RESCORE_MULTIPLIER, count)
         candidates = self._index.search(binarize(queries), depth)[1]
-        ranked = np.empty((len(queries), k), dtype=np.int64)
-        for row, (query, ids) in enumerate(zip(queries, candidates, strict=True)):
+        ranked = []
+        for query, ids in zip(queries, candidates, strict=True):
             if self.scheme == Scheme.BINARY_RESCORE_QUERY:
                 scores = unpack_signs(self._bits[ids], self.dim) @ query
             else:
                 scores = self._documents[ids] @ query
-            ranked[row] = ids[np.argsort(-scores, kind="stable")[:k]]
-        return ranked
+            ranked.append(_best_first(ids, -scores, k))
+        return np.stack(ranked)
+
+
+def _best_first(ids: np.ndarray, keys: np.ndarray, k: int) -> np.ndarray:
+    """Order ids by key, smallest first, breaking exact ties by the lower id, and keep k."""
+    return ids[np.lexsort((ids, keys))][:k]
 
 
 def bytes_per_vector(scheme: Scheme, dim: int) -> tuple[float, float]:

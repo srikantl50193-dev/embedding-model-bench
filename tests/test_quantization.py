@@ -101,3 +101,11 @@ def test_faiss_refuses_to_share_a_process_with_torch(monkeypatch: pytest.MonkeyP
     monkeypatch.setitem(sys.modules, "torch", object())
     with pytest.raises(RuntimeError, match="make benchmark"):
         load_faiss()
+
+
+@pytest.mark.parametrize("scheme", list(Scheme))
+def test_identical_documents_tie_in_index_order_as_in_the_benchmark(scheme: Scheme) -> None:
+    documents = unit_vectors(30)
+    documents[20] = documents[5]  # an identical chunk later in the corpus
+    ranked = SearchIndex(scheme, documents).search(documents[5:6], 2)
+    assert ranked[0].tolist() == [5, 20]
