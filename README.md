@@ -188,7 +188,7 @@ The whole Fine Print pipeline was run with each model on its tuning set: retriev
 
 ## Process notes
 
-- **A caching bug in the held-out run:** the first attempt stopped before scoring anything. The embedding step had cached both held-out sets as one combined list, which the cache keys differently from each set alone, so scoring found nothing. Scoring is built to stop rather than load a model, so it did. No held-out number was produced or seen. The fix (`f5123bd`) embeds each set separately, a test now covers two sets, and the run was then done once.
+- **A caching bug in the held-out run:** the first attempt stopped before scoring anything. The embedding step had cached both held-out sets as one combined list, which the cache keys differently from each set alone, so scoring found nothing. Scoring is built to stop rather than load a model, so it did. No held-out number was produced or seen. The fix (`988346b`) embeds each set separately, a test now covers two sets, and the run was then done once.
 - **Memory during fine-tuning:** standard MultipleNegativesRankingLoss at batch 32 exhausted this 16 GB machine. Training used the cached form of the loss (the same loss computed over the full batch, with less memory), mini-batches of 8, eager attention (Apple GPU fused attention can't apply dropout), and a capped, regularly emptied GPU memory pool.
 - **Timings were remeasured:** the first benchmark timings were taken with Chrome open, so all of them were measured again on a clean machine before being reported.
 - **A refactor partway through:** after the experiments, the code was refactored. Every stored result was recomputed from cached vectors and matched exactly.
