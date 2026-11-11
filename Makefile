@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample
 
 setup:
 	bash scripts/setup.sh
@@ -42,3 +42,11 @@ matryoshka:
 
 quantization:
 	uv run emb-bench quantization
+
+# Time 20 chunks before committing to the full run.
+generate-sample:
+	uv run emb-bench generate --limit 20
+
+# The full run, resumable. caffeinate keeps the Mac awake until it finishes.
+generate:
+	caffeinate -i uv run emb-bench generate

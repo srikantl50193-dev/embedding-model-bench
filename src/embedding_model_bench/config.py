@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "gemma4:e4b"
     ollama_timeout: float = Field(default=3.0, gt=0)
+    ollama_generate_timeout: float = Field(default=300.0, gt=0)
 
 
 @lru_cache(maxsize=1)

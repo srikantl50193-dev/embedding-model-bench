@@ -379,6 +379,69 @@ def quantization() -> None:
         _report_provisional_machine(result.spec.key, result.machine)
 
 
+@app.command()
+def generate(
+    limit: Annotated[
+        int | None, typer.Option(help="Stop after this many new chunks. Omit to finish the run.")
+    ] = None,
+) -> None:
+    """Generate synthetic questions with Ollama. Safe to stop and rerun: it resumes."""
+    import httpx  # noqa: PLC0415
+
+    from embedding_model_bench.corpus import load_chunks  # noqa: PLC0415
+    from embedding_model_bench.data import (  # noqa: PLC0415
+        LINK_FOLDER,
+        FinePrintDataError,
+        verify_manifest,
+    )
+    from embedding_model_bench.machine import heavy_step, peak_rss_mb  # noqa: PLC0415
+    from embedding_model_bench.synthetic import (  # noqa: PLC0415
+        OllamaGenerator,
+        output_path,
+        run_generation,
+    )
+
+    settings = get_settings()
+    checks = run_preflight("generation", settings)
+    if not all(check.ok for check in checks):
+        for check in checks:
+            typer.echo(f"[{'ok' if check.ok else 'STOP'}] {check.name}: {check.detail}", err=True)
+        raise typer.Exit(1)
+    try:
+        verify_manifest(settings.fine_print_dir, settings.data_dir)
+    except FinePrintDataError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    _, chunks = load_chunks(settings.data_dir / LINK_FOLDER / "raw")
+
+    with (
+        heavy_step(settings.results_dir / ".heavy.lock"),
+        httpx.Client() as client,
+    ):
+        generator = OllamaGenerator(
+            settings.ollama_url, settings.ollama_model, settings.ollama_generate_timeout, client
+        )
+        path = output_path(settings.data_dir, generator.digest)
+        typer.echo(f"Writing to {path}")
+        try:
+            summary = run_generation(
+                chunks,
+                path,
+                generator,
+                settings.ollama_model,
+                generator.digest,
+                limit=limit,
+                log=lambda message: typer.echo(message, err=True),
+            )
+        except KeyboardInterrupt:
+            typer.echo("Stopped. Everything finished so far is saved; rerun to continue.")
+            raise typer.Exit(130) from None
+        finally:
+            generator.unload()
+    typer.echo(summary.model_dump_json(indent=2))
+    typer.echo(f"Peak RSS of this process: {peak_rss_mb():.0f} MB (Ollama's memory is separate)")
+
+
 def _report_provisional_machine(key: str, machine: MachineState) -> None:
     """Say so if competing apps or low memory mean timings can't be final."""
     if machine.timings_provisional:
