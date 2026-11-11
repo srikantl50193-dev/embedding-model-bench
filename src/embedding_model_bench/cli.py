@@ -20,7 +20,14 @@ if TYPE_CHECKING:
     from fine_print.models import Chunk
 
     from embedding_model_bench.benchmark import BenchmarkInputs
-    from embedding_model_bench.models import BenchmarkResult, DataManifest, MachineState
+    from embedding_model_bench.embedding import Encoder
+    from embedding_model_bench.holdout import HoldoutSet
+    from embedding_model_bench.models import (
+        BenchmarkResult,
+        DataManifest,
+        EvalQuestion,
+        MachineState,
+    )
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -468,6 +475,192 @@ def cost() -> None:
     typer.echo(f"Peak RSS: {max(r.peak_rss_mb for r in results):.0f} MB")
     for result in results:
         _report_provisional(result.config.name, result.machine)
+
+
+# The held-out run.
+
+HOLDOUT_RESULT = "result.json"
+FRESH_NOTE = (
+    "Headline. 30 questions written by Claude from randomly sampled chunks, frozen (hash-checked) "
+    "before any benchmark ran, and never scored before this run."
+)
+SPENT_NOTE = (
+    "Previously used: Fine Print scored these 20 questions for its v2 and v3, so this is not a "
+    "clean estimate. Reported separately, as agreed."
+)
+
+
+def _holdout_sets(
+    settings: Settings, inputs: BenchmarkInputs, tuning_check: bool
+) -> list[tuple[str, str, str, list[EvalQuestion]]]:
+    """Return each question set to score, as (name, note, sha256, questions)."""
+    from embedding_model_bench.data import LINK_FOLDER  # noqa: PLC0415
+    from embedding_model_bench.files import read_jsonl  # noqa: PLC0415
+    from embedding_model_bench.models import EvalQuestion  # noqa: PLC0415
+
+    link_dir = settings.data_dir / LINK_FOLDER
+
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    if tuning_check:
+        path = link_dir / "tuning_questions.jsonl"
+        return [
+            (
+                "Tuning set (pipeline check)",
+                "Must match the stored results.",
+                sha(path),
+                list(inputs.questions),
+            )
+        ]
+    fresh = settings.fresh_holdout_path
+    if sha(fresh) != settings.fresh_holdout_sha256:
+        typer.echo("The fresh held-out file doesn't match its frozen hash.", err=True)
+        raise typer.Exit(1)
+    spent = link_dir / "holdout" / "questions.jsonl"  # Its hash was checked with the manifest.
+    return [
+        ("Fresh held-out set", FRESH_NOTE, sha(fresh), read_jsonl(fresh, EvalQuestion)),
+        (
+            "Fine Print's held-out set (previously used)",
+            SPENT_NOTE,
+            sha(spent),
+            read_jsonl(spent, EvalQuestion),
+        ),
+    ]
+
+
+@app.command(name="holdout-embed", hidden=True)
+def holdout_embed(
+    tuning_check: Annotated[bool, typer.Option(help="Use the tuning set.")] = False,
+) -> None:
+    """Embed the held-out questions with every configuration's model. Loads models on a miss."""
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.holdout import CONFIGS, config_spec, embed_all  # noqa: PLC0415
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    specs = list(
+        {c.name: config_spec(c, settings.results_dir / "finetune") for c in CONFIGS}.values()
+    )
+    texts = [
+        q.question
+        for _, _, _, questions in _holdout_sets(settings, inputs, tuning_check)
+        for q in questions
+    ]
+    device = _devices()[0]
+    with heavy_step(_lock_path(settings)):
+        embed_all(
+            specs,
+            texts,
+            inputs.chunks,
+            settings.data_dir / "embeddings",
+            lambda spec: SentenceTransformerEncoder(spec, device),
+        )
+
+
+def _never_load() -> Encoder:
+    raise RuntimeError("A vector wasn't cached: run the embedding step first.")
+
+
+@app.command(name="holdout-score", hidden=True)
+def holdout_score(
+    tuning_check: Annotated[bool, typer.Option(help="Use the tuning set.")] = False,
+) -> None:
+    """Score every configuration from cached vectors only. Never loads a model."""
+    from embedding_model_bench.files import write_json  # noqa: PLC0415
+    from embedding_model_bench.holdout import (  # noqa: PLC0415
+        CONFIGS,
+        HoldoutResult,
+        config_spec,
+        holdout_table,
+        score_set,
+    )
+
+    settings = get_settings()
+    inputs = _prepared_inputs()
+    specs = {c.name: config_spec(c, settings.results_dir / "finetune") for c in CONFIGS}
+    sets = [
+        score_set(
+            name,
+            note,
+            sha,
+            questions,
+            inputs.chunks,
+            specs,
+            cache_dir=settings.data_dir / "embeddings",
+            load=_never_load,
+        )
+        for name, note, sha, questions in _holdout_sets(settings, inputs, tuning_check)
+    ]
+    result = HoldoutResult(
+        fine_print_commit=inputs.fine_print_commit,
+        corpus_fingerprint=inputs.corpus_fingerprint,
+        sets=sets,
+    )
+    table = holdout_table(result)
+    typer.echo(table)
+    if tuning_check:
+        _check_against_tuning(result.sets[0], settings)
+        return
+    out_dir = settings.results_dir / "holdout"
+    write_json(out_dir / HOLDOUT_RESULT, result)
+    (out_dir / "summary.md").write_text(table, encoding="utf-8")
+
+
+def _check_against_tuning(held: HoldoutSet, settings: Settings) -> None:
+    """Compare each configuration's tuning scores with the experiment that first measured them."""
+    from embedding_model_bench.files import read_json  # noqa: PLC0415
+    from embedding_model_bench.finetune import FineTuneResult  # noqa: PLC0415
+    from embedding_model_bench.matryoshka import MatryoshkaResult  # noqa: PLC0415
+    from embedding_model_bench.models import BenchmarkResult  # noqa: PLC0415
+    from embedding_model_bench.quantization import QuantizationResult, Scheme  # noqa: PLC0415
+    from embedding_model_bench.registry import MODELS  # noqa: PLC0415
+
+    results = settings.results_dir
+    failures = []
+    for row in held.rows:
+        config = row.config
+        if config.fine_tuned:
+            expected = read_json(results / "finetune" / "all.json", FineTuneResult).tuning
+        elif config.scheme != Scheme.FLOAT32:
+            quant = read_json(
+                results / "quantization" / f"{config.key}-{config.dim}.json", QuantizationResult
+            )
+            expected = next(s.tuning for s in quant.schemes if s.scheme == config.scheme)
+        elif config.dim < MODELS[config.key].dim:
+            mat = read_json(results / "matryoshka" / f"{config.key}.json", MatryoshkaResult)
+            expected = next(v.tuning for v in mat.variants if v.dim == config.dim)
+        else:
+            expected = read_json(results / "models" / f"{config.key}.json", BenchmarkResult).tuning
+        status = "ok" if row.scores == expected else "DIFFERENT"
+        if status != "ok":
+            failures.append(config.name)
+        typer.echo(f"[{status}] {config.name}")
+    if failures:
+        raise typer.Exit(1)
+
+
+@app.command()
+def holdout(
+    tuning_check: Annotated[
+        bool, typer.Option(help="Run the same steps on the tuning set, to check the pipeline.")
+    ] = False,
+) -> None:
+    """Score the final configurations on the held-out sets. Runs once; refuses a second time."""
+    settings = get_settings()
+    done = settings.results_dir / "holdout" / HOLDOUT_RESULT
+    if not tuning_check and done.exists():
+        typer.echo(
+            f"The held-out run has already happened ({done}). It is run once only.", err=True
+        )
+        raise typer.Exit(1)
+    extra = ["--tuning-check"] if tuning_check else []
+    base = [sys.executable, "-m", "embedding_model_bench.cli"]
+    for step in ("holdout-embed", "holdout-score"):
+        if subprocess.run([*base, step, *extra], check=False).returncode:
+            typer.echo(f"{step} failed.", err=True)
+            raise typer.Exit(1)
 
 
 # Synthetic data and fine-tuning.
