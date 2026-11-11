@@ -103,17 +103,22 @@ def config_spec(config: HoldoutConfig, finetune_dir: Path) -> ModelSpec:
 
 def embed_all(
     specs: Sequence[ModelSpec],
-    question_texts: Sequence[str],
+    question_sets: Sequence[Sequence[str]],
     chunks: Sequence[Chunk],
     cache_dir: Path,
     load: Callable[[ModelSpec], Encoder],
 ) -> None:
-    """Put every vector the scoring step needs into the cache, loading models only on a miss."""
+    """Put every vector the scoring step needs into the cache, loading models only on a miss.
+
+    Each question set is embedded on its own, exactly as `score_config` will ask for it: the cache
+    key covers the whole list of texts, so a combined list would never be found again.
+    """
     chunk_texts = [chunk.embedding_text() for chunk in chunks]
     for spec in specs:
         embed = cached_embedder(spec, cache_dir, lambda spec=spec: load(spec))
-        embed(question_texts, spec.query_prefix)
         embed(chunk_texts, spec.passage_prefix)
+        for questions in question_sets:
+            embed(questions, spec.query_prefix)
 
 
 def score_config(

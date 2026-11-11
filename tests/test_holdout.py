@@ -49,7 +49,7 @@ def test_the_configurations_match_the_frozen_note() -> None:
 def test_scoring_reads_only_the_cache_after_embedding(
     tmp_path: Path, dim: int, scheme: Scheme
 ) -> None:
-    embed_all([SPEC], [q.question for q in QUESTIONS], CHUNKS, tmp_path, lambda _s: FakeEncoder())
+    embed_all([SPEC], [[q.question for q in QUESTIONS]], CHUNKS, tmp_path, lambda _s: FakeEncoder())
     relevant = tuning_relevant(CHUNKS, QUESTIONS)
     scores = score_config(
         fake_config("x", dim, scheme), SPEC, QUESTIONS, CHUNKS, relevant, tmp_path, never
@@ -70,7 +70,7 @@ def test_every_configuration_is_compared_with_the_baseline(
     configs = [fake_config("a"), fake_config("b", 32), fake_config("base")]
     monkeypatch.setattr(holdout, "CONFIGS", configs)
     monkeypatch.setattr(holdout, "BASELINE", configs[-1])
-    embed_all([SPEC], [q.question for q in QUESTIONS], CHUNKS, tmp_path, lambda _s: FakeEncoder())
+    embed_all([SPEC], [[q.question for q in QUESTIONS]], CHUNKS, tmp_path, lambda _s: FakeEncoder())
     held = score_set(
         "Fresh",
         "note",
@@ -87,3 +87,12 @@ def test_every_configuration_is_compared_with_the_baseline(
     assert "## Fresh" in table
     assert f"2/{len(QUESTIONS)}" in table
     assert f"n={len(QUESTIONS)}" in table
+
+
+def test_two_question_sets_are_each_found_by_scoring(tmp_path: Path) -> None:
+    first, second = QUESTIONS[:1], QUESTIONS[1:]
+    sets = [[q.question for q in first], [q.question for q in second]]
+    embed_all([SPEC], sets, CHUNKS, tmp_path, lambda _s: FakeEncoder())
+    for questions in (first, second):
+        relevant = tuning_relevant(CHUNKS, questions)
+        score_config(fake_config("x"), SPEC, questions, CHUNKS, relevant, tmp_path, never)

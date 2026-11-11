@@ -543,16 +543,15 @@ def holdout_embed(
     specs = list(
         {c.name: config_spec(c, settings.results_dir / "finetune") for c in CONFIGS}.values()
     )
-    texts = [
-        q.question
+    question_sets = [
+        [q.question for q in questions]
         for _, _, _, questions in _holdout_sets(settings, inputs, tuning_check)
-        for q in questions
     ]
     device = _devices()[0]
     with heavy_step(_lock_path(settings)):
         embed_all(
             specs,
-            texts,
+            question_sets,
             inputs.chunks,
             settings.data_dir / "embeddings",
             lambda spec: SentenceTransformerEncoder(spec, device),
