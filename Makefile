@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample prepare-training
 
 setup:
 	bash scripts/setup.sh
@@ -50,3 +50,6 @@ generate-sample:
 # The full run, resumable. caffeinate keeps the Mac awake until it finishes.
 generate:
 	caffeinate -i uv run emb-bench generate
+
+prepare-training:
+	uv run emb-bench prepare-training

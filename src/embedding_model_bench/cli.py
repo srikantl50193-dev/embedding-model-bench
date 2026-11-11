@@ -3,6 +3,7 @@
 import platform
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import psutil
@@ -12,6 +13,10 @@ from embedding_model_bench.config import get_settings
 from embedding_model_bench.preflight import HeavyStep, run_preflight
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy as np
+
     from embedding_model_bench.benchmark import BenchmarkInputs
     from embedding_model_bench.models import BenchmarkResult, MachineState
 
@@ -440,6 +445,95 @@ def generate(
             generator.unload()
     typer.echo(summary.model_dump_json(indent=2))
     typer.echo(f"Peak RSS of this process: {peak_rss_mb():.0f} MB (Ollama's memory is separate)")
+
+
+@app.command(name="prepare-training")
+def prepare_training() -> None:
+    """Filter the synthetic questions, check them for leakage and mine hard negatives."""
+    import hashlib  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    from embedding_model_bench.data import LINK_FOLDER  # noqa: PLC0415
+    from embedding_model_bench.embedding import (  # noqa: PLC0415
+        SentenceTransformerEncoder,
+        embed_cached,
+    )
+    from embedding_model_bench.machine import heavy_step, peak_rss_mb  # noqa: PLC0415
+    from embedding_model_bench.registry import BGE_SMALL  # noqa: PLC0415
+    from embedding_model_bench.synthetic import (  # noqa: PLC0415
+        PROMPT_VERSION,
+        load_records,
+        unique_chunks,
+    )
+    from embedding_model_bench.training_data import prepare_training_data  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()  # Also refuses while Ollama holds a model in memory.
+    files = sorted((settings.data_dir / "synthetic").glob(f"questions-v{PROMPT_VERSION}-*.jsonl"))
+    if len(files) != 1:
+        typer.echo(f"Expected one synthetic question file, found {len(files)}", err=True)
+        raise typer.Exit(1)
+    records = load_records(files[0])
+    expected = len(unique_chunks(inputs.chunks))
+    if len(records) < expected:
+        typer.echo(f"Only {len(records)} of {expected} chunks have questions yet.", err=True)
+        typer.echo("Finish `make generate` first.", err=True)
+        raise typer.Exit(1)
+
+    fresh = settings.fresh_holdout_path.read_bytes()
+    if hashlib.sha256(fresh).hexdigest() != settings.fresh_holdout_sha256:
+        typer.echo("The fresh held-out file doesn't match its frozen hash.", err=True)
+        raise typer.Exit(1)
+
+    def questions(path: Path) -> list[str]:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line)["question"] for line in lines if line.strip()]
+
+    link_dir = settings.data_dir / LINK_FOLDER
+    # Used only to keep these questions out of training data. Never printed or saved.
+    eval_sets = {
+        "tuning": [q.question for q in inputs.questions],
+        "tuning out of scope": questions(link_dir / "tuning_out_of_scope.jsonl"),
+        "Fine Print held-out (spent)": questions(link_dir / "holdout" / "questions.jsonl"),
+        "Fine Print held-out out of scope": questions(link_dir / "holdout" / "out_of_scope.jsonl"),
+        "fresh held-out": questions(settings.fresh_holdout_path),
+    }
+
+    cache_dir = settings.data_dir / "embeddings"
+    loaded: list[SentenceTransformerEncoder] = []
+
+    def encoder() -> SentenceTransformerEncoder:
+        if not loaded:
+            loaded.append(SentenceTransformerEncoder(BGE_SMALL, _devices()[0]))
+        return loaded[0]
+
+    def embed_queries(texts: Sequence[str]) -> np.ndarray:
+        return embed_cached(BGE_SMALL, texts, BGE_SMALL.query_prefix, cache_dir, encoder)[0]
+
+    with heavy_step(settings.results_dir / ".heavy.lock"):
+        chunk_texts = [chunk.embedding_text() for chunk in inputs.chunks]
+        chunk_vectors = embed_cached(
+            BGE_SMALL, chunk_texts, BGE_SMALL.passage_prefix, cache_dir, encoder
+        )[0]
+        examples, report = prepare_training_data(
+            records,
+            inputs.chunks,
+            chunk_vectors,
+            embed_queries,
+            eval_sets,
+            log=lambda message: typer.echo(message, err=True),
+        )
+
+    out_dir = settings.data_dir / "training"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for split in ("train", "validation"):
+        lines = [e.model_dump_json() for e in examples if e.split == split]
+        (out_dir / f"{split}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    results = settings.results_dir / "synthetic"
+    results.mkdir(parents=True, exist_ok=True)
+    (results / "report.json").write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    typer.echo(report.model_dump_json(indent=2))
+    typer.echo(f"Peak RSS: {peak_rss_mb():.0f} MB")
 
 
 def _report_provisional_machine(key: str, machine: MachineState) -> None:
