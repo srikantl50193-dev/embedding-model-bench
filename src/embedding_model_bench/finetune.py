@@ -67,7 +67,8 @@ class TrainConfig(FrozenModel):
     excluded_companies: tuple[str, ...] = ()
     max_epochs: int = 4
     batch_size: int = 32
-    mini_batch_size: int = 16  # Only limits memory; the loss is the same as without caching.
+    mini_batch_size: int = 8  # Only limits memory; the loss is the same as without caching.
+    empty_cache_steps: int = 10  # Return PyTorch's cached GPU memory every this many steps.
     learning_rate: float = 2e-5
     warmup_ratio: float = 0.1
     evals_per_epoch: int = 2
@@ -292,6 +293,7 @@ def train(
         greater_is_better=True,
         logging_steps=eval_steps,
         report_to="none",
+        torch_empty_cache_steps=config.empty_cache_steps,
     )
     loss = CachedMultipleNegativesRankingLoss(model, mini_batch_size=config.mini_batch_size)
     trainer = SentenceTransformerTrainer(

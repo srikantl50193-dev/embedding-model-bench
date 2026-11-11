@@ -538,6 +538,8 @@ def prepare_training() -> None:
 
 FINETUNE_RUNS = ("all", "unseen")
 SMOKE_STEPS = 4
+MPS_HIGH_WATERMARK = "0.5"
+MPS_LOW_WATERMARK = "0.4"
 
 
 @app.command(name="finetune-one", hidden=True)
@@ -546,6 +548,12 @@ def finetune_one(
     smoke: Annotated[bool, typer.Option(help="Train 4 steps only, to test the pipeline.")] = False,
 ) -> None:
     """Fine-tune and score one run. `finetune` runs this once per process."""
+    import os  # noqa: PLC0415
+
+    # Cap the GPU memory pool before torch starts, so that running short raises an error instead
+    # of pushing everything else into swap. Ratios are of macOS's recommended GPU working set.
+    os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", MPS_HIGH_WATERMARK)
+    os.environ.setdefault("PYTORCH_MPS_LOW_WATERMARK_RATIO", MPS_LOW_WATERMARK)
     from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
     from embedding_model_bench.finetune import (  # noqa: PLC0415
         TrainConfig,
