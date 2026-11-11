@@ -1,4 +1,4 @@
-.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample prepare-training
+.PHONY: setup lint format typecheck test check env data data-verify baseline benchmark prefixes matryoshka quantization generate generate-sample prepare-training finetune
 
 setup:
 	bash scripts/setup.sh
@@ -53,3 +53,6 @@ generate:
 
 prepare-training:
 	uv run emb-bench prepare-training
+
+finetune:
+	uv run emb-bench finetune

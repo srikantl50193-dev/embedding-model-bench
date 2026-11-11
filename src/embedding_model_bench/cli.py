@@ -536,6 +536,100 @@ def prepare_training() -> None:
     typer.echo(f"Peak RSS: {peak_rss_mb():.0f} MB")
 
 
+FINETUNE_RUNS = ("all", "unseen")
+SMOKE_STEPS = 4
+
+
+@app.command(name="finetune-one", hidden=True)
+def finetune_one(
+    name: str,
+    smoke: Annotated[bool, typer.Option(help="Train 4 steps only, to test the pipeline.")] = False,
+) -> None:
+    """Fine-tune and score one run. `finetune` runs this once per process."""
+    from embedding_model_bench.embedding import SentenceTransformerEncoder  # noqa: PLC0415
+    from embedding_model_bench.finetune import (  # noqa: PLC0415
+        TrainConfig,
+        choose_unseen_companies,
+        evaluate_fine_tuned,
+        load_examples,
+        train,
+    )
+    from embedding_model_bench.machine import heavy_step  # noqa: PLC0415
+    from embedding_model_bench.models import BenchmarkResult  # noqa: PLC0415
+    from embedding_model_bench.registry import BGE_SMALL  # noqa: PLC0415
+
+    settings = get_settings()
+    inputs = _prepared_inputs()  # Also refuses while Ollama holds a model in memory.
+    data = settings.data_dir / "training"
+    examples = load_examples(data / "train.jsonl") + load_examples(data / "validation.jsonl")
+    unseen = choose_unseen_companies(inputs.questions)
+    config = TrainConfig(
+        name=f"smoke-{name}" if smoke else name,
+        excluded_companies=tuple(unseen) if name == "unseen" else (),
+        max_steps=SMOKE_STEPS if smoke else -1,
+    )
+    baseline = BenchmarkResult.model_validate_json(
+        (settings.results_dir / "models" / f"{BGE_SMALL.key}.json").read_text(encoding="utf-8")
+    )
+    device = _devices()[0]
+    log = lambda message: typer.echo(f"[{config.name}] {message}", err=True)  # noqa: E731
+    with heavy_step(settings.results_dir / ".heavy.lock"):
+        run = train(config, examples, inputs.chunks, settings.models_dir, device, log)
+        log(f"trained in {run.seconds:.0f} s; scoring")
+        result = evaluate_fine_tuned(
+            run,
+            inputs,
+            baseline,
+            unseen,
+            settings.data_dir / "embeddings",
+            lambda spec: SentenceTransformerEncoder(spec, device),
+        )
+    out_dir = settings.models_dir if smoke else settings.results_dir / "finetune"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{config.name}.json").write_text(
+        result.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    log(f"peak RSS {run.peak_rss_mb:.0f} MB")
+
+
+@app.command()
+def finetune(
+    smoke: Annotated[
+        bool, typer.Option(help="Train 4 steps per run, to test the pipeline.")
+    ] = False,
+) -> None:
+    """Fine-tune bge-small on all companies, then without three, and compare with the baseline."""
+    from embedding_model_bench.finetune import FineTuneResult, finetune_table  # noqa: PLC0415
+    from embedding_model_bench.models import BenchmarkResult  # noqa: PLC0415
+    from embedding_model_bench.registry import BGE_SMALL  # noqa: PLC0415
+
+    settings = get_settings()
+    failed = []
+    for name in FINETUNE_RUNS:
+        command = [sys.executable, "-m", "embedding_model_bench.cli", "finetune-one", name]
+        if subprocess.run([*command, *(["--smoke"] if smoke else [])], check=False).returncode:
+            failed.append(name)
+    if smoke:
+        typer.echo("Smoke test done." if not failed else f"Smoke test failed: {failed}")
+        raise typer.Exit(1 if failed else 0)
+    out_dir = settings.results_dir / "finetune"
+    results = [
+        FineTuneResult.model_validate_json((out_dir / f"{n}.json").read_text(encoding="utf-8"))
+        for n in FINETUNE_RUNS
+        if (out_dir / f"{n}.json").exists()
+    ]
+    baseline = BenchmarkResult.model_validate_json(
+        (settings.results_dir / "models" / f"{BGE_SMALL.key}.json").read_text(encoding="utf-8")
+    )
+    if results:
+        table = finetune_table(results, baseline)
+        (out_dir / "summary.md").write_text(table, encoding="utf-8")
+        typer.echo(table)
+    if failed:
+        typer.echo(f"Failed: {', '.join(failed)}", err=True)
+        raise typer.Exit(1)
+
+
 def _report_provisional_machine(key: str, machine: MachineState) -> None:
     """Say so if competing apps or low memory mean timings can't be final."""
     if machine.timings_provisional:

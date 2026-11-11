@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     fine_print_dir: Path = PROJECT_ROOT.parent / "fine-print"
     data_dir: Path = PROJECT_ROOT / "data"
     results_dir: Path = PROJECT_ROOT / "results"
+    # Fine-tuned weights. Ignored by git: they can be rebuilt with `make finetune`.
+    models_dir: Path = PROJECT_ROOT / "models"
 
     # The frozen held-out set. Changing it needs a new hash here, which a review would catch.
     fresh_holdout_path: Path = PROJECT_ROOT / "eval" / "fresh_holdout" / "questions.jsonl"
