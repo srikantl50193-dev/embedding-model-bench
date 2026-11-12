@@ -8,5 +8,23 @@ coverage.xml
 .env
 .DS_Store
 # Symlinks to ../fine-print, the embedding cache and fine-tuned models.
-data/
-models/
+/data/
+/models/
+results/.heavy.lock
+
+# Secrets and local configuration. Commit a template as .env.example if one is ever needed.
+.env.*
+!.env.example
+# Logs, notebooks and editor folders.
+*.log
+.ipynb_checkpoints/
+.idea/
+.vscode/
+# Model weights, vector caches and indexes, wherever they end up. None are ever committed.
+*.safetensors
+*.gguf
+*.bin
+*.npy
+chroma*/
+*.partial
+*.partial.*

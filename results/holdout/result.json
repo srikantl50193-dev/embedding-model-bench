@@ -1,0 +1,642 @@
+{
+  "fine_print_commit": "37d5ab3b927aa09dce5881ab24b86dca3e9a113e",
+  "corpus_fingerprint": "5f6b69ea24df39182deb83e5fd9d28ee995abebc8cdb48ccc231cc7fab3a1d83",
+  "sets": [
+    {
+      "name": "Fresh held-out set",
+      "note": "Headline. 30 questions written by Claude from randomly sampled chunks, frozen (hash-checked) before any benchmark ran, and never scored before this run.",
+      "num_questions": 30,
+      "sha256": "590c4b360169d2b0efd1123790fa6c47e7226c3d7e4b12c01fdfdac60fd76fb4",
+      "rows": [
+        {
+          "config": {
+            "name": "bge-base 768d float32",
+            "key": "bge-base-en-v1.5",
+            "dim": 768,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 30,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.23333333333333334,
+              "3": 0.5666666666666667,
+              "5": 0.6666666666666666,
+              "10": 0.7666666666666667
+            },
+            "recall_at_k": {
+              "1": 0.2,
+              "3": 0.5333333333333333,
+              "5": 0.6,
+              "10": 0.675
+            },
+            "mrr": 0.4182275132275132,
+            "ndcg_at_10": 0.47089593315360806,
+            "first_relevant_ranks": [
+              2,
+              7,
+              2,
+              null,
+              1,
+              3,
+              7,
+              1,
+              9,
+              2,
+              2,
+              null,
+              3,
+              1,
+              2,
+              1,
+              4,
+              1,
+              3,
+              5,
+              null,
+              null,
+              5,
+              null,
+              1,
+              2,
+              1,
+              2,
+              null,
+              null
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 30,
+            "k": 5,
+            "wins": 1,
+            "losses": 4,
+            "sign_test_p": 0.375,
+            "within_noise": false
+          }
+        },
+        {
+          "config": {
+            "name": "bge-base 768d binary + float32 rescoring (recommended)",
+            "key": "bge-base-en-v1.5",
+            "dim": 768,
+            "scheme": "binary, rescored with float32 vectors",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 30,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.23333333333333334,
+              "3": 0.5666666666666667,
+              "5": 0.6666666666666666,
+              "10": 0.7666666666666667
+            },
+            "recall_at_k": {
+              "1": 0.2,
+              "3": 0.5333333333333333,
+              "5": 0.6,
+              "10": 0.6666666666666666
+            },
+            "mrr": 0.4182275132275132,
+            "ndcg_at_10": 0.46946686703632295,
+            "first_relevant_ranks": [
+              2,
+              7,
+              2,
+              null,
+              1,
+              3,
+              7,
+              1,
+              9,
+              2,
+              2,
+              null,
+              3,
+              1,
+              2,
+              1,
+              4,
+              1,
+              3,
+              5,
+              null,
+              null,
+              5,
+              null,
+              1,
+              2,
+              1,
+              2,
+              null,
+              null
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 30,
+            "k": 5,
+            "wins": 1,
+            "losses": 4,
+            "sign_test_p": 0.375,
+            "within_noise": false
+          }
+        },
+        {
+          "config": {
+            "name": "bge-base 256d float32",
+            "key": "bge-base-en-v1.5",
+            "dim": 256,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 30,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.2,
+              "3": 0.6,
+              "5": 0.6333333333333333,
+              "10": 0.7666666666666667
+            },
+            "recall_at_k": {
+              "1": 0.18333333333333332,
+              "3": 0.5083333333333333,
+              "5": 0.5916666666666667,
+              "10": 0.6833333333333333
+            },
+            "mrr": 0.3876322751322751,
+            "ndcg_at_10": 0.45596456531013635,
+            "first_relevant_ranks": [
+              2,
+              9,
+              2,
+              null,
+              1,
+              1,
+              3,
+              1,
+              6,
+              3,
+              2,
+              null,
+              2,
+              3,
+              3,
+              1,
+              2,
+              8,
+              7,
+              3,
+              null,
+              null,
+              3,
+              null,
+              1,
+              4,
+              1,
+              3,
+              null,
+              null
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 30,
+            "k": 5,
+            "wins": 1,
+            "losses": 5,
+            "sign_test_p": 0.2188,
+            "within_noise": false
+          }
+        },
+        {
+          "config": {
+            "name": "bge-small 384d float32, fine-tuned",
+            "key": "bge-small-en-v1.5",
+            "dim": 384,
+            "scheme": "float32",
+            "fine_tuned": true
+          },
+          "scores": {
+            "num_queries": 30,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.5,
+              "3": 0.7666666666666667,
+              "5": 0.8666666666666667,
+              "10": 0.9333333333333333
+            },
+            "recall_at_k": {
+              "1": 0.45,
+              "3": 0.6583333333333333,
+              "5": 0.7583333333333333,
+              "10": 0.8333333333333334
+            },
+            "mrr": 0.6525396825396825,
+            "ndcg_at_10": 0.6796841080789765,
+            "first_relevant_ranks": [
+              1,
+              3,
+              1,
+              3,
+              1,
+              1,
+              5,
+              1,
+              5,
+              1,
+              1,
+              6,
+              5,
+              1,
+              2,
+              2,
+              2,
+              2,
+              7,
+              1,
+              null,
+              null,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2,
+              2,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 30,
+            "k": 5,
+            "wins": 3,
+            "losses": 0,
+            "sign_test_p": 0.25,
+            "within_noise": false
+          }
+        },
+        {
+          "config": {
+            "name": "bge-small 384d float32 (baseline)",
+            "key": "bge-small-en-v1.5",
+            "dim": 384,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 30,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.4,
+              "3": 0.7,
+              "5": 0.7666666666666667,
+              "10": 0.8333333333333334
+            },
+            "recall_at_k": {
+              "1": 0.3333333333333333,
+              "3": 0.6333333333333333,
+              "5": 0.6833333333333333,
+              "10": 0.7583333333333333
+            },
+            "mrr": 0.5572619047619047,
+            "ndcg_at_10": 0.5856223393225968,
+            "first_relevant_ranks": [
+              1,
+              4,
+              2,
+              2,
+              1,
+              2,
+              null,
+              1,
+              5,
+              2,
+              1,
+              null,
+              3,
+              3,
+              3,
+              1,
+              1,
+              1,
+              7,
+              2,
+              null,
+              null,
+              2,
+              8,
+              1,
+              1,
+              1,
+              1,
+              null,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 30,
+            "k": 5,
+            "wins": 0,
+            "losses": 0,
+            "sign_test_p": 1.0,
+            "within_noise": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fine Print's held-out set (previously used)",
+      "note": "Previously used: Fine Print scored these 20 questions for its v2 and v3, so this is not a clean estimate. Reported separately, as agreed.",
+      "num_questions": 20,
+      "sha256": "8147c7f08a1aff5444f77756ecb4d1405747177c1ebfedef295d9ebb11ae5b37",
+      "rows": [
+        {
+          "config": {
+            "name": "bge-base 768d float32",
+            "key": "bge-base-en-v1.5",
+            "dim": 768,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 20,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.5,
+              "3": 0.7,
+              "5": 0.75,
+              "10": 0.85
+            },
+            "recall_at_k": {
+              "1": 0.31666666666666665,
+              "3": 0.4833333333333333,
+              "5": 0.5583333333333333,
+              "10": 0.655
+            },
+            "mrr": 0.6104166666666667,
+            "ndcg_at_10": 0.5442570163817431,
+            "first_relevant_ranks": [
+              6,
+              8,
+              null,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2,
+              null,
+              3,
+              1,
+              1,
+              1,
+              3,
+              null,
+              4,
+              1,
+              2,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 20,
+            "k": 5,
+            "wins": 0,
+            "losses": 2,
+            "sign_test_p": 0.5,
+            "within_noise": true
+          }
+        },
+        {
+          "config": {
+            "name": "bge-base 768d binary + float32 rescoring (recommended)",
+            "key": "bge-base-en-v1.5",
+            "dim": 768,
+            "scheme": "binary, rescored with float32 vectors",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 20,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.5,
+              "3": 0.7,
+              "5": 0.75,
+              "10": 0.85
+            },
+            "recall_at_k": {
+              "1": 0.31666666666666665,
+              "3": 0.4833333333333333,
+              "5": 0.5583333333333333,
+              "10": 0.655
+            },
+            "mrr": 0.6113095238095239,
+            "ndcg_at_10": 0.5448048160803038,
+            "first_relevant_ranks": [
+              6,
+              7,
+              null,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2,
+              null,
+              3,
+              1,
+              1,
+              1,
+              3,
+              null,
+              4,
+              1,
+              2,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 20,
+            "k": 5,
+            "wins": 0,
+            "losses": 2,
+            "sign_test_p": 0.5,
+            "within_noise": true
+          }
+        },
+        {
+          "config": {
+            "name": "bge-base 256d float32",
+            "key": "bge-base-en-v1.5",
+            "dim": 256,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 20,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.45,
+              "3": 0.7,
+              "5": 0.85,
+              "10": 0.85
+            },
+            "recall_at_k": {
+              "1": 0.2833333333333333,
+              "3": 0.4833333333333333,
+              "5": 0.58,
+              "10": 0.605
+            },
+            "mrr": 0.5741666666666666,
+            "ndcg_at_10": 0.5032069300634857,
+            "first_relevant_ranks": [
+              5,
+              4,
+              null,
+              3,
+              1,
+              1,
+              1,
+              1,
+              1,
+              null,
+              5,
+              1,
+              1,
+              3,
+              3,
+              null,
+              3,
+              1,
+              2,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 20,
+            "k": 5,
+            "wins": 1,
+            "losses": 1,
+            "sign_test_p": 1.0,
+            "within_noise": true
+          }
+        },
+        {
+          "config": {
+            "name": "bge-small 384d float32, fine-tuned",
+            "key": "bge-small-en-v1.5",
+            "dim": 384,
+            "scheme": "float32",
+            "fine_tuned": true
+          },
+          "scores": {
+            "num_queries": 20,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.5,
+              "3": 0.65,
+              "5": 0.8,
+              "10": 0.95
+            },
+            "recall_at_k": {
+              "1": 0.26666666666666666,
+              "3": 0.4583333333333333,
+              "5": 0.63,
+              "10": 0.755
+            },
+            "mrr": 0.6245833333333334,
+            "ndcg_at_10": 0.5824497565530169,
+            "first_relevant_ranks": [
+              5,
+              8,
+              4,
+              6,
+              1,
+              1,
+              1,
+              1,
+              1,
+              4,
+              2,
+              1,
+              6,
+              1,
+              3,
+              null,
+              1,
+              1,
+              2,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 20,
+            "k": 5,
+            "wins": 2,
+            "losses": 3,
+            "sign_test_p": 1.0,
+            "within_noise": true
+          }
+        },
+        {
+          "config": {
+            "name": "bge-small 384d float32 (baseline)",
+            "key": "bge-small-en-v1.5",
+            "dim": 384,
+            "scheme": "float32",
+            "fine_tuned": false
+          },
+          "scores": {
+            "num_queries": 20,
+            "num_without_relevant": 0,
+            "hit_at_k": {
+              "1": 0.6,
+              "3": 0.75,
+              "5": 0.85,
+              "10": 0.9
+            },
+            "recall_at_k": {
+              "1": 0.36666666666666664,
+              "3": 0.5083333333333333,
+              "5": 0.6583333333333333,
+              "10": 0.7333333333333333
+            },
+            "mrr": 0.6922222222222223,
+            "ndcg_at_10": 0.6042956325482967,
+            "first_relevant_ranks": [
+              null,
+              2,
+              9,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2,
+              5,
+              1,
+              1,
+              5,
+              1,
+              3,
+              null,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "vs_baseline": {
+            "num_queries": 20,
+            "k": 5,
+            "wins": 0,
+            "losses": 0,
+            "sign_test_p": 1.0,
+            "within_noise": true
+          }
+        }
+      ]
+    }
+  ]
+}

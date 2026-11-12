@@ -2,7 +2,13 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+# A newer push to the same branch makes an older run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -10,10 +16,13 @@ permissions:
 env:
   # The commit of Fine Print whose chunker the results were produced with.
   FINE_PRINT_COMMIT: eb00efc102c2cc4cc13547b5d076af23907344fd
+  # Fine Print is read-only for this project, bytecode caches included.
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       # uv.lock expects the chunker's repo beside this one. Tests use only tiny fake data.

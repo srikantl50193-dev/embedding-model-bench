@@ -5,6 +5,9 @@ description = "Which embedding model should a client use for their documents, an
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "accelerate>=1.15.0",
+    "datasets>=5.1.0,<5.2",
+    "faiss-cpu>=1.15.1,<1.16",
     "fine-print",
     "httpx>=0.28.1",
     "huggingface-hub>=2.4.0",
@@ -14,8 +17,8 @@ dependencies = [
     "pydantic>=2.14.2",
     "pydantic-settings>=2.16.2",
     "sentence-transformers>=6.2.0",
-    "structlog>=26.1.0",
     "torch>=2.15.0",
+    "transformers>=5.22.1,<5.22.2",
     "typer>=0.27.3",
 ]
 
@@ -45,7 +48,10 @@ target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "PL", "D"]
+select = [
+    "E", "F", "I", "B", "UP", "SIM", "RUF", "PL", "D",
+    "NPY", "PERF", "C4", "RET", "PIE", "FURB", "PTH", "ARG",
+]
 ignore = [
     "D203", # Conflicts with D211 (no blank line before a class docstring).
     "D213", # Conflicts with D212 (summary on the first docstring line).
@@ -64,15 +70,14 @@ convention = "google"
 [tool.ruff.lint.pylint]
 max-args = 7
 
-[tool.ty.environment]
-python-version = "3.14"
-
 [tool.ty.src]
 include = ["src", "tests", "scripts"]
 
-[tool.pytest.ini_options]
+[tool.pytest]
+pythonpath = ["tests"]
 testpaths = ["tests"]
-addopts = "--strict-markers"
+# Strict markers, config, xfail and parametrize ids.
+strict = true
 
 [tool.coverage.run]
 source = ["embedding_model_bench"]
@@ -81,6 +86,8 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+# The CLI wiring and the training loop need real models, which the tests never load.
+fail_under = 70
 
 [dependency-groups]
 dev = [
@@ -89,4 +96,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.17.3",
     "ty>=0.0.97",
+]
+docs = [
+    "matplotlib>=3.11.2",
 ]

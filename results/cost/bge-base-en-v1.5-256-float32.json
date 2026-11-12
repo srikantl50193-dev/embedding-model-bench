@@ -1,0 +1,48 @@
+{
+  "config": {
+    "key": "bge-base-en-v1.5",
+    "dim": 256,
+    "scheme": "float32"
+  },
+  "query_encode_p95_ms_mps": 13.09,
+  "query_encode_p95_ms_cpu": 34.18,
+  "chunks_per_s_mps": 48.7,
+  "chunks_per_s_cpu": 29.0,
+  "num_queries": 200,
+  "search_threads": 1,
+  "points": [
+    {
+      "num_vectors": 100000,
+      "memory_mb": 102.4,
+      "disk_mb": 102.4,
+      "faiss_index_mb": 102.4,
+      "build_seconds": 0.01,
+      "search_p50_ms": 2.036,
+      "search_p95_ms": 2.199,
+      "projected_query_p95_ms_mps": 15.29,
+      "projected_query_p95_ms_cpu": 36.38,
+      "projected_embed_hours_mps": 0.57,
+      "projected_embed_hours_cpu": 0.96
+    },
+    {
+      "num_vectors": 1000000,
+      "memory_mb": 1024.0,
+      "disk_mb": 1024.0,
+      "faiss_index_mb": 1024.0,
+      "build_seconds": 0.34,
+      "search_p50_ms": 20.226,
+      "search_p95_ms": 20.641,
+      "projected_query_p95_ms_mps": 33.73,
+      "projected_query_p95_ms_cpu": 54.82,
+      "projected_embed_hours_mps": 5.7,
+      "projected_embed_hours_cpu": 9.58
+    }
+  ],
+  "peak_rss_mb": 7538.3,
+  "machine": {
+    "available_gb": 6.88,
+    "swap_used_gb": 3.68,
+    "competing_apps": [],
+    "timings_provisional": false
+  }
+}
