@@ -30,7 +30,7 @@ jobs:
         run: |
           git clone https://github.com/srikantl50193-dev/fine-print ../fine-print
           git -C ../fine-print checkout "$FINE_PRINT_COMMIT"
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           enable-cache: true
       - name: Install dependencies
